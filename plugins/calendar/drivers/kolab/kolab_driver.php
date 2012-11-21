@@ -316,6 +316,9 @@ class kolab_driver extends calendar_driver
    */
   public function new_event($event)
   {
+    if (!$this->validate($event))
+      return false;
+
     $cid = $event['calendar'] ? $event['calendar'] : reset(array_keys($this->calendars));
     if ($storage = $this->calendars[$cid]) {
       // handle attachments to add
