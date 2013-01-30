@@ -8,7 +8,7 @@
  * @author Thomas Bruederli <bruederli@kolabsys.com>
  *
  * Copyright (C) 2010, Lazlo Westerhof <hello@lazlo.me>
- * Copyright (C) 2012, Kolab Systems AG <contact@kolabsys.com>
+ * Copyright (C) 2013, Kolab Systems AG <contact@kolabsys.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -734,7 +734,9 @@ class calendar extends rcube_plugin
         }
         else if (in_array($status, array('ACCEPTED','TENTATIVE','DECLINED'))) {
           $html = html::div('rsvp-status ' . strtolower($status), $this->gettext('youhave'.strtolower($status)));
-          if ($existing['sequence'] >= $event['sequence'] || (!$event['sequence'] && $existing['changed'] && $existing['changed'] >= $event['changed'])) {
+          if ($existing['sequence'] >= $event['sequence'] || (!$event['sequence']
+                && $this->rc->config->get('calendar_itip_dtstampcheck', false)
+                && $existing['changed'] && $existing['changed'] >= $event['changed'])) {
             $action = '';  // nothing to do here
          }
         }
@@ -1809,6 +1811,7 @@ class calendar extends rcube_plugin
         $existing = $this->driver->get_event($event['uid'], true, false, true);
         
         if ($existing) {
+          $calendar = $calendars[$existing['calendar']];
           // only update attendee status
           if ($this->ical->method == 'REPLY') {
             // try to identify the attendee using the email sender address
@@ -1845,7 +1848,8 @@ class calendar extends rcube_plugin
             }
           }
           // import the (newer) event
-          else if ($event['sequence'] >= $existing['sequence'] || $event['changed'] >= $existing['changed']) {
+          else if ($event['sequence'] >= $existing['sequence'] || (!$event['sequence']
+                    && (!$this->rc->config->get('calendar_itip_dtstampcheck', false) || $event['changed'] >= $existing['changed']))) {
             $event['id'] = $existing['id'];
             $event['calendar'] = $existing['calendar'];
             $success = $this->driver->edit_event($event);
