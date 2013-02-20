@@ -434,7 +434,7 @@ class kolab_calendar
       $record['end'] = $record['end']->format('U');
 */
     // all-day events go from 12:00 - 13:00
-    if ($record['end'] <= $record['start'] && $record['allday']) {
+    if (!empty($record['start']) && is_a($record['start'], 'DateTime') && $record['end'] <= $record['start'] && $record['allday']) {
       $record['end'] = clone $record['start'];
       $record['end']->add(new DateInterval('PT1H'));
     }
