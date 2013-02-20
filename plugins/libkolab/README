@@ -24,6 +24,7 @@ Installing the Horde 5 library:
 
 $ git clone https://github.com/thomascube/horde.git horde-git
 $ cp -r horde-git/framework/Kolab_Format/lib/Horde <roundcube-dir>/plugins/libkolab/lib/Horde
+$ cp -r horde-git/framework/Exception/lib/Horde/* <roundcube-dir>/plugins/libkolab/lib/Horde/
 $ rm -rf horde-git
 
 
