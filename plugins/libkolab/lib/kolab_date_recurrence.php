@@ -73,7 +73,9 @@ class kolab_date_recurrence
     public function next_start($timestamp = false)
     {
         $time = false;
-        if ($this->next && ($next = $this->engine->nextActiveRecurrence(array('year' => $this->next->year, 'month' => $this->next->month, 'mday' => $this->next->mday + 1, 'hour' => $this->next->hour, 'min' => $this->next->min, 'sec' => $this->next->sec)))) {
+        $after = clone $this->next;
+        $after->mday = $after->mday + 1;
+        if ($this->next && ($next = $this->engine->nextActiveRecurrence($after))) {
             if (!$next->after($this->next)) {
                 // avoid endless loops if recurrence computation fails
                 return false;
@@ -125,14 +127,28 @@ class kolab_date_recurrence
      * @param string Date limit (where infinite recurrences should abort)
      * @return mixed Timestamp with end date of the last event or False if recurrence exceeds limit
      */
-    public function end($limit = 'now +1 year')
+    public function end($limit = null)
     {
         if ($this->object['recurrence']['UNTIL'])
             return $this->object['recurrence']['UNTIL']->format('U');
 
-        $limit_time = strtotime($limit);
-        while ($next_start = $this->next_start(true)) {
-            if ($next_start > $limit_time)
+        // determine a reasonable limit if none given
+        if (!$limit) {
+            switch ($this->object['recurrence']['FREQ']) {
+                case 'YEARLY':  $intvl = 'P100Y'; break;
+                case 'MONTHLY': $intvl = 'P20Y';  break;
+                default:        $intvl = 'P10Y';  break;
+            }
+
+            $limit = clone $this->object['start'];
+            $limit->add(new DateInterval($intvl));
+        }
+        else if (is_string($limit)) {
+            $limit = new DateTime($limit, new DateTimeZone(kolab_format::$timezone->getName()));
+        }
+
+        while ($next_start = $this->next_start()) {
+            if ($next_start > $limit)
                 break;
         }
 
