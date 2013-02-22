@@ -74,6 +74,10 @@ class kolab_date_recurrence
     {
         $time = false;
         if ($this->next && ($next = $this->engine->nextActiveRecurrence(array('year' => $this->next->year, 'month' => $this->next->month, 'mday' => $this->next->mday + 1, 'hour' => $this->next->hour, 'min' => $this->next->min, 'sec' => $this->next->sec)))) {
+            if (!$next->after($this->next)) {
+                // avoid endless loops if recurrence computation fails
+                return false;
+            }
             if ($this->allday) {
                 $next->hour = $this->hour;  # fix time for all-day events
                 $next->min = 0;
