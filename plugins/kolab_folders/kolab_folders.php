@@ -28,6 +28,7 @@ class kolab_folders extends rcube_plugin
 
     public $types = array('mail', 'event', 'journal', 'task', 'note', 'contact', 'configuration', 'file', 'freebusy');
     public $mail_types = array('inbox', 'drafts', 'sentitems', 'outbox', 'wastebasket', 'junkemail');
+    public $subs_types = array('mail', 'event', 'journal', 'task', 'note', 'contact', 'file');
 
     private $rc;
     private static $instance;
@@ -459,7 +460,7 @@ class kolab_folders extends rcube_plugin
 
             // create folder
             if (!$exists && !$storage->folder_exists($foldername)) {
-                $storage->create_folder($foldername, $type1 == 'mail');
+                $storage->create_folder($foldername, in_array($type1, $this->subs_types));
             }
 
             // set type
