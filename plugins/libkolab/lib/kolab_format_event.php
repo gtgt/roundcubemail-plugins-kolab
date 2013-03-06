@@ -166,7 +166,7 @@ class kolab_format_event extends kolab_format
 
             // exclusions
             foreach ((array)$ra['EXDATE'] as $excl) {
-                $this->kolab_object['recurrence']['exclusion'][] = $excl->format('Y-m-d');
+                $this->kolab_object['recurrence']['exclusion'][] = $excl;
             }
         }
         else if (isset($object['recurrence']))
