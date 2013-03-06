@@ -413,6 +413,13 @@ class kolab_driver extends calendar_driver
             $limit = clone $event['end'];
             $limit->add(new DateInterval('P370D'));
             $recurring = reset($storage->_get_recurring_events($event, $event['start'], $limit, $event['id'].'-1'));
+            
+            // no future instances found: delete the master event (bug #1677)
+            if (!$recurring['start']) {
+              $success = $storage->delete_event($master, $force);
+              break;
+            }
+            
             $master['start'] = $recurring['start'];
             $master['end'] = $recurring['end'];
             if ($master['recurrence']['COUNT'])
@@ -432,6 +439,11 @@ class kolab_driver extends calendar_driver
             $master['recurrence']['UNTIL'] = clone $event['start'];
             $master['recurrence']['UNTIL']->sub(new DateInterval('P1D'));
             unset($master['recurrence']['COUNT']);
+
+            // if all future instances are deleted, remove recurrence rule entirely (bug #1677)
+            if ($master['recurrence']['UNTIL']->format('Ymd') == $master['start']->format('Ymd'))
+              $master['recurrence'] = array();
+
             $success = $storage->update_event($master);
             break;
           }
@@ -555,6 +567,7 @@ class kolab_driver extends calendar_driver
       case 'new':
         // save submitted data as new (non-recurring) event
         $event['recurrence'] = array();
+        unset($event['recurrence_id']);
         $event['uid'] = $this->cal->generate_uid();
         
         // copy attachment data to new event
@@ -613,6 +626,9 @@ class kolab_driver extends calendar_driver
             unset($event['recurrence']['BYDAY']);
           if ($master['recurrence']['BYMONTH'] == $master['start']->format('n'))
             unset($event['recurrence']['BYMONTH']);
+          
+          // remove reference to old master (bug #1677)
+          unset($event['recurrence_id']);
           
           $success = $storage->insert_event($event);
           break;
