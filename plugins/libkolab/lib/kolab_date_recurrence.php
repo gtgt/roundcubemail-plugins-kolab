@@ -42,6 +42,11 @@ class kolab_date_recurrence
     function __construct($event)
     {
         $this->object = $object = $event->to_array();
+
+        // shift dates to user's timezone to correctly compute times across DST changes
+        $object['start']->setTimezone(kolab_format::$timezone);
+        $object['end']->setTimezone(kolab_format::$timezone);
+
         $this->next = new Horde_Date($object['start'], kolab_format::$timezone->getName());
 
         if (is_object($object['start']) && is_object($object['end']))
