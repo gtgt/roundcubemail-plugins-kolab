@@ -123,6 +123,7 @@ class kolab_driver extends calendar_driver
         'class_name' => $cal->get_namespace(),
         'default'  => $cal->storage->default,
         'active'   => $cal->storage->is_subscribed(),
+        'owner'    => $cal->get_owner(),
       );
     }
 
