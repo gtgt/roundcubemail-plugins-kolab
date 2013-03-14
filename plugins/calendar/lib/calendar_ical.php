@@ -208,7 +208,9 @@ class calendar_ical
         
         case 'STATUS':
           if ($attr['value'] == 'TENTATIVE')
-            $event['free_busy'] == 'tentative';
+            $event['free_busy'] = 'tentative';
+          else if ($attr['value'] == 'CANCELLED')
+            $event['cancelled'] = true;
           break;
         
         case 'PRIORITY':
@@ -361,7 +363,7 @@ class calendar_ical
       
       foreach ($events as $event) {
         $vevent = "BEGIN:VEVENT" . self::EOL;
-        $vevent .= "UID:" . self::escpape($event['uid']) . self::EOL;
+        $vevent .= "UID:" . self::escape($event['uid']) . self::EOL;
         $vevent .= $this->format_datetime("DTSTAMP", $event['changed'] ?: new DateTime(), false, true) . self::EOL;
         if ($event['sequence'])
             $vevent .= "SEQUENCE:" . intval($event['sequence']) . self::EOL;
@@ -376,21 +378,21 @@ class calendar_ical
           $vevent .= $this->format_datetime("DTSTART", $event['start'], false) . self::EOL;
           $vevent .= $this->format_datetime("DTEND",   $event['end'], false) . self::EOL;
         }
-        $vevent .= "SUMMARY:" . self::escpape($event['title']) . self::EOL;
-        $vevent .= "DESCRIPTION:" . self::escpape($event['description']) . self::EOL;
+        $vevent .= "SUMMARY:" . self::escape($event['title']) . self::EOL;
+        $vevent .= "DESCRIPTION:" . self::escape($event['description']) . self::EOL;
         
         if (!empty($event['attendees'])){
           $vevent .= $this->_get_attendees($event['attendees']);
         }
 
         if (!empty($event['location'])) {
-          $vevent .= "LOCATION:" . self::escpape($event['location']) . self::EOL;
+          $vevent .= "LOCATION:" . self::escape($event['location']) . self::EOL;
         }
         if ($event['recurrence']) {
           $vevent .= "RRULE:" . libcalendaring::to_rrule($event['recurrence'], self::EOL) . self::EOL;
         }
         if(!empty($event['categories'])) {
-          $vevent .= "CATEGORIES:" . self::escpape(strtoupper($event['categories'])) . self::EOL;
+          $vevent .= "CATEGORIES:" . self::escape(strtoupper($event['categories'])) . self::EOL;
         }
         if ($event['sensitivity'] > 0) {
           $vevent .= "CLASS:" . ($event['sensitivity'] == 2 ? 'CONFIDENTIAL' : 'PRIVATE') . self::EOL;
@@ -402,7 +404,7 @@ class calendar_ical
           $vevent .= "BEGIN:VALARM\n";
           if ($val[1]) $vevent .= "TRIGGER:" . preg_replace('/^([-+])(.+)/', '\\1PT\\2', $trigger) . self::EOL;
           else         $vevent .= "TRIGGER;VALUE=DATE-TIME:" . gmdate('Ymd\THis\Z', $val[0]) . self::EOL;
-          if ($action) $vevent .= "ACTION:" . self::escpape(strtoupper($action)) . self::EOL;
+          if ($action) $vevent .= "ACTION:" . self::escape(strtoupper($action)) . self::EOL;
           $vevent .= "END:VALARM\n";
         }
         
@@ -452,14 +454,18 @@ class calendar_ical
     else {
       // <ATTR>;TZID=Europe/Zurich:20120706T210000
       $tz = $dt->getTimezone();
-      $tzid = $tz && $tz->getName() != 'UTC' ? ';TZID=' . $tz->getName() : '';
+      $tzname = $tz ? $tz->getName() : null;
+      $tzid = $tzname && $tzname != 'UTC' && $tzname != '+00:00' ? ';TZID=' . self::escape($tzname) : '';
       return $attr . $tzid . ':' . $dt->format('Ymd\THis' . ($tzid ? '' : '\Z'));
     }
   }
 
-  private function escpape($str)
+  /**
+   * Escape values according to RFC 2445 4.3.11
+   */
+  private function escape($str)
   {
-    return preg_replace('/(?<!\\\\)([\:\;\,\\n\\r])/', '\\\$1', $str);
+    return strtr($str, array('\\' => '\\\\', "\n" => '\n', ';' => '\;', ',' => '\,'));
   }
 
   /**
