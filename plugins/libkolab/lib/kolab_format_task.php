@@ -28,7 +28,7 @@ class kolab_format_task extends kolab_format
 
     protected $xmltype = 'task';
 
-    public static $fulltext_cols = array('title', 'description', 'location', 'attendees:name', 'attendees:email', 'categories');
+    public static $fulltext_cols = array('title', 'description', 'location', 'categories');
 
     // Kolab 2 format field map
     private $kolab2_fieldmap = array(
@@ -160,4 +160,22 @@ console($this->data, $this->kolab_object);
 
         return $tags;
     }
+
+    /**
+      * Callback for kolab_storage_cache to get words to index for fulltext search
+      *
+      * @return array List of words to save in cache
+      */
+     public function get_words()
+     {
+         $data = '';
+         foreach (self::$fulltext_cols as $col) {
+             $val = is_array($this->data[$col]) ? join(' ', $this->data[$col]) : $this->data[$col];
+             if (strlen($val))
+                 $data .= $val . ' ';
+         }
+
+         return array_unique(rcube_utils::normalize_string($data, true));
+     }
+
 }

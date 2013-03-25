@@ -241,6 +241,34 @@ class kolab_format_event extends kolab_format
     }
 
     /**
+     * Callback for kolab_storage_cache to get words to index for fulltext search
+     *
+     * @return array List of words to save in cache
+     */
+    public function get_words()
+    {
+        $data = '';
+        foreach (self::$fulltext_cols as $colname) {
+            list($col, $field) = explode(':', $colname);
+
+            if ($field) {
+                $a = array();
+                foreach ((array)$this->data[$col] as $attr)
+                    $a[] = $attr[$field];
+                $val = join(' ', $a);
+            }
+            else {
+                $val = is_array($this->data[$col]) ? join(' ', $this->data[$col]) : $this->data[$col];
+            }
+
+            if (strlen($val))
+                $data .= $val . ' ';
+        }
+
+        return array_unique(rcube_utils::normalize_string($data, true));
+    }
+
+    /**
      * Load data from old Kolab2 format
      */
     public function fromkolab2($rec)
