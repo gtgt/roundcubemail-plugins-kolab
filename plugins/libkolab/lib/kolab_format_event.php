@@ -151,7 +151,7 @@ class kolab_format_event extends kolab_format
                     $ra['BYMONTH'] = $object['start']->format('n');
 
                 $this->kolab_object['recurrence']['cycle'] = 'yearly';
-                $this->kolab_object['recurrence']['month'] = $this->month_map[intval($ra['BYMONTH'])];
+                $this->kolab_object['recurrence']['month'] = $this->kolab2_monthmap[intval($ra['BYMONTH'])];
 
                 if ($ra['BYDAY'] && preg_match('/(-?[1-4])([A-Z]+)/', $ra['BYDAY'], $m)) {
                     $this->kolab_object['recurrence']['type'] = 'weekday';
