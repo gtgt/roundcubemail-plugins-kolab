@@ -346,7 +346,6 @@ class kolab_format_event extends kolab_format
             'free_busy' => $rec['show-time-as'],
             'priority' => $rec['priority'],
             'sensitivity' => $rec['sensitivity'],
-            'changed' => $rec['last-modification-date'],
         );
 
         $this->data['allday'] = $this->data['start']->_dateonly;
