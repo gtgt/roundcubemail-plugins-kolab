@@ -90,8 +90,6 @@ class kolab_format_task extends kolab_format
         // cache this data
         $this->data = $object;
         unset($this->data['_formatobj']);
-
-console($this->data, $this->kolab_object);
     }
 
     /**
