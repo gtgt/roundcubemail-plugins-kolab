@@ -74,7 +74,7 @@ class kolab_format_distributionlist extends kolab_format
     {
         $object = array(
             'uid'     => $record['uid'],
-            'changed' => $record['changed'],
+            'changed' => self::php_datetime($record['last-modification-date']),
             'name'    => $record['display-name'],
             'member'  => array(),
         );

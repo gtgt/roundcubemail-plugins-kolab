@@ -557,8 +557,8 @@ class tasklist_kolab_driver extends tasklist_driver
             if (!$record['start']->_dateonly)
                 $task['starttime'] = $record['start']->format('h:i');
         }
-        if (is_a($record['dtstamp'], 'DateTime')) {
-            $task['changed'] = $record['dtstamp'];
+        if (is_a($record['changed'], 'DateTime')) {
+            $task['changed'] = $record['changed'];
         }
 
         if ($record['alarms']) {

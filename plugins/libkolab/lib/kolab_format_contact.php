@@ -245,7 +245,7 @@ class kolab_format_contact extends kolab_format
     {
         $object = array(
           'uid' => $record['uid'],
-          'changed' => $record['last-modification-date'],
+          'changed' => self::php_datetime($rec['last-modification-date']),
           'email' => array(),
           'phone' => array(),
         );

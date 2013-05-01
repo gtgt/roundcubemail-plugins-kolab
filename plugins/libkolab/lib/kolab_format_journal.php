@@ -61,7 +61,7 @@ class kolab_format_journal extends kolab_format
     {
         $object = array(
             'uid'     => $record['uid'],
-            'changed' => $record['last-modification-date'],
+            'changed' => self::php_datetime($record['last-modification-date']),
         );
 
         // TODO: implement this

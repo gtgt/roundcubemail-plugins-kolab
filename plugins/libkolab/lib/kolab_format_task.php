@@ -107,7 +107,7 @@ class kolab_format_task extends kolab_format
     {
         $object = array(
             'uid'     => $record['uid'],
-            'dtstamp' => $record['last-modification-date'],
+            'changed' => self::php_datetime($record['last-modification-date']),
             'complete' => intval($record['completed']),
         );
 
