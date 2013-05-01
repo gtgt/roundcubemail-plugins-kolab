@@ -39,6 +39,7 @@ class kolab_format_journal extends kolab_format
         $this->init();
 
         // TODO: set object propeties
+        $object['changed'] = new DateTime();
 
         // cache this data
         $this->data = $object;

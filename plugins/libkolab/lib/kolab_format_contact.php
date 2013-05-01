@@ -125,7 +125,7 @@ class kolab_format_contact extends kolab_format
         if ($object['uid'])
             $this->kolab_object['uid'] = $object['uid'];
 
-        $this->kolab_object['last-modification-date'] = time();
+        $object['changed'] = new DateTime();
 
         // map name fields rcube => $kolab
         foreach ($this->kolab2_fieldmap_name as $kolab => $rcube) {

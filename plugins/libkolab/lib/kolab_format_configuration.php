@@ -40,6 +40,8 @@ class kolab_format_configuration extends kolab_format
         if ($object['type'])
             $this->subtype = $object['type'];
 
+        $object['changed'] = new DateTime();
+
         // adjust content-type string
         $this->CTYPE = 'application/x-vnd.kolab.configuration.' . $this->subtype;
 

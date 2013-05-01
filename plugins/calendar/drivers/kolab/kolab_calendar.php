@@ -335,7 +335,6 @@ class kolab_calendar
     }
     else {
       $updated = true;
-      $object['last-modification-date'] = time();  // set last-modification timestamp
       $this->events[$event['id']] = $this->_to_rcube_event($object);
     }
 

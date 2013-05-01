@@ -61,7 +61,7 @@ class kolab_format_task extends kolab_format
         if ($object['uid'])
             $this->kolab_object['uid'] = $object['uid'];
 
-        $this->kolab_object['last-modification-date'] = new DateTime();
+        $object['changed'] = new DateTime();
 
         // map basic fields rcube => $kolab
         foreach ($this->kolab2_fieldmap as $kolab => $rcube) {

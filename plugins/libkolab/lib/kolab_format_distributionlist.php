@@ -41,7 +41,8 @@ class kolab_format_distributionlist extends kolab_format
         if ($object['uid'])
             $this->kolab_object['uid'] = $object['uid'];
 
-        $this->kolab_object['changed'] = new DateTime();
+        $object['changed'] = new DateTime();
+
         $this->kolab_object['display-name'] = $object['name'];
         $this->kolab_object['member'] = array();
 
