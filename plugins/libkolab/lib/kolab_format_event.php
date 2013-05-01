@@ -317,7 +317,6 @@ class kolab_format_event extends kolab_format
                 'email' => $rec['organizer']['smtp-address'],
                 'status' => 'ACCEPTED',
             );
-            $_attendees .= $rec['organizer']['display-name'] . ' ' . $rec['organizer']['smtp-address'] . ' ';
         }
 
         foreach ((array)$rec['attendee'] as $attendee) {
@@ -328,7 +327,6 @@ class kolab_format_event extends kolab_format
                 'status' => $this->kolab2_statusmap[$attendee['status']],
                 'rsvp' => $attendee['request-response'],
             );
-            $_attendees .= $rec['organizer']['display-name'] . ' ' . $rec['organizer']['smtp-address'] . ' ';
         }
 
         $this->data = array(
