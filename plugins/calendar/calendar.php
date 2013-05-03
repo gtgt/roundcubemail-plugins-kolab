@@ -671,7 +671,7 @@ class calendar extends rcube_plugin
           foreach ($old['attendees'] as $i => $attendee) {
             if ($attendee['role'] == 'ORGANIZER')
               $organizer = $attendee;
-            else if ($attendee['email'] && in_array($attendee['email'], $emails)) {
+            else if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
               $old['attendees'][$i]['status'] = 'DECLINED';
             }
           }
@@ -708,7 +708,7 @@ class calendar extends rcube_plugin
         if ($existing = $this->driver->get_event($event, true, false, true)) {
           $emails = $this->get_user_emails();
           foreach ($existing['attendees'] as $i => $attendee) {
-            if ($attendee['email'] && in_array($attendee['email'], $emails)) {
+            if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
               $status = $attendee['status'];
               break;
             }
@@ -1059,7 +1059,7 @@ class calendar extends rcube_plugin
         $identity['emails'][] = $rec['email'];
       }
       $identity['emails'][] = $this->rc->user->get_username();
-      $settings['identity'] = array('name' => $identity['name'], 'email' => $identity['email'], 'emails' => ';' . join(';', $identity['emails']));
+      $settings['identity'] = array('name' => $identity['name'], 'email' => strtolower($identity['email']), 'emails' => ';' . strtolower(join(';', $identity['emails'])));
     }
 
     return $settings;
@@ -1283,7 +1283,7 @@ class calendar extends rcube_plugin
       foreach ($event['attendees'] as $i => $attendee) {
         if ($attendee['role'] == 'ORGANIZER')
           $organizer = true;
-        if ($attendee['email'] == in_array($attendee['email'], $emails))
+        if ($attendee['email'] == in_array(strtolower($attendee['email']), $emails))
           $owner = $i;
         else if (!isset($attendee['rsvp']))
           $event['attendees'][$i]['rsvp'] = true;
@@ -1339,7 +1339,7 @@ class calendar extends rcube_plugin
     $sent = 0;
     foreach ((array)$event['attendees'] as $attendee) {
       // skip myself for obvious reasons
-      if (!$attendee['email'] || in_array($attendee['email'], $emails))
+      if (!$attendee['email'] || in_array(strtolower($attendee['email']), $emails))
         continue;
       
       // which template to use for mail text
@@ -1728,7 +1728,7 @@ class calendar extends rcube_plugin
           // check my status
           $status = 'unknown';
           foreach ($event['attendees'] as $i => $attendee) {
-            if ($attendee['email'] && in_array($attendee['email'], $emails)) {
+            if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
               $status = strtoupper($attendee['status']);
               break;
             }
@@ -1837,7 +1837,7 @@ class calendar extends rcube_plugin
           if ($attendee['role'] == 'ORGANIZER') {
             $organizer = $attendee;
           }
-          else if ($attendee['email'] && in_array($attendee['email'], $emails)) {
+          else if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
             $event['attendees'][$i]['status'] = strtoupper($status);
           }
         }
@@ -1923,7 +1923,7 @@ class calendar extends rcube_plugin
 
 
     // send iTip reply
-    if ($this->ical->method == 'REQUEST' && $organizer && !in_array($organizer['email'], $emails) && !$error_msg) {
+    if ($this->ical->method == 'REQUEST' && $organizer && !in_array(strtolower($organizer['email']), $emails) && !$error_msg) {
       $itip = $this->load_itip();
       if ($itip->send_itip_message($event, 'REPLY', $organizer, 'itipsubject' . $status, 'itipmailbody' . $status))
         $this->rc->output->command('display_message', $this->gettext(array('name' => 'sentresponseto', 'vars' => array('mailto' => $organizer['name'] ? $organizer['name'] : $organizer['email']))), 'confirmation');
@@ -2018,9 +2018,9 @@ class calendar extends rcube_plugin
    */
   private function get_user_emails()
   {
-    $emails = array($this->rc->user->get_username());
+    $emails = array(strtolower($this->rc->user->get_username()));
     foreach ($this->rc->user->list_identities() as $identity)
-      $emails[] = $identity['email'];
+      $emails[] = strtolower($identity['email']);
     
     return array_unique($emails);
   }
