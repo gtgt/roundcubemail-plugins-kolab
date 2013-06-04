@@ -591,13 +591,28 @@ class kolab_driver extends calendar_driver
           $recurring = reset($storage->_get_recurring_events($event, $event['start'], $limit, $event['id'].'-1'));
           $master['start'] = $recurring['start'];
           $master['end'] = $recurring['end'];
-          if ($master['recurrence']['COUNT'])
-            $master['recurrence']['COUNT']--;
+          
+          // adjust recurrence count
+          if ($master['recurrence']['COUNT']) {
+            if (empty($master['recurrence']['EXDATE'])) {
+              $master['recurrence']['COUNT']--;
+            }
+            else {  // compute remaining repetitions considering exdates
+              $limit->add(new DateInterval('P10Y'));
+              $repeats = $storage->_get_recurring_events($event, $event['start'], $limit);
+              $master['recurrence']['COUNT'] = count($repeats);
+            }
+          }
+          
+          // changed last recurring instance: delete master
+          if (empty($master['start']) || (isset($master['recurrence']['COUNT']) && $master['recurrence']['COUNT'] <= 0)) {
+              $storage->delete_event($master, true);
+          }
         }
         else {  // add exception to master event
           $master['recurrence']['EXDATE'][] = $old['start'];
-		}
-
+        }
+        
         $storage->update_event($master);
         
         // insert new event for this occurence
