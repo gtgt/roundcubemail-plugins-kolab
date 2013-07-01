@@ -210,6 +210,8 @@ class kolab_format_contact extends kolab_format
                 $this->kolab_object['office-location'] = $adr['locality'];
             }
         }
+        // set type property for proper caching
+        $object['_type'] = 'contact';
 
         // cache this data
         $this->data = $object;
