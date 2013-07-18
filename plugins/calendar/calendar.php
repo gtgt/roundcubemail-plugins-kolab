@@ -749,6 +749,7 @@ class calendar extends rcube_plugin
         $this->rc->output->command('plugin.update_event_rsvp_status', array(
           'uid' => $event['uid'],
           'id' => asciiwords($event['uid'], true),
+          'saved' => $existing ? true : false,
           'status' => $status,
           'action' => $action,
           'html' => $html,
@@ -1717,7 +1718,7 @@ class calendar extends rcube_plugin
           foreach (array('accepted','tentative','declined') as $method) {
             $rsvp_buttons .= html::tag('input', array(
               'type' => 'button',
-              'class' => 'button',
+              'class' => "button $method",
               'onclick' => "rcube_calendar.add_event_from_mail('" . JQ($mime_id.':'.$idx) . "', '$method')",
               'value' => $this->gettext('itip' . $method),
             ));
@@ -1791,7 +1792,7 @@ class calendar extends rcube_plugin
     if ($html) {
       $this->ui->init();
       $p['content'] = $html . $p['content'];
-      $this->rc->output->add_label('calendar.savingdata','calendar.deleteventconfirm');
+      $this->rc->output->add_label('calendar.savingdata','calendar.deleteventconfirm','calendar.declinedeleteconfirm');
     }
 
     return $p;
@@ -1807,6 +1808,7 @@ class calendar extends rcube_plugin
     $mbox = get_input_value('_mbox', RCUBE_INPUT_POST);
     $mime_id = get_input_value('_part', RCUBE_INPUT_POST);
     $status = get_input_value('_status', RCUBE_INPUT_POST);
+    $delete = intval(get_input_value('_del', RCUBE_INPUT_POST));
     $charset = RCMAIL_CHARSET;
     
     // establish imap connection
@@ -1892,15 +1894,24 @@ class calendar extends rcube_plugin
               $error_msg = $this->gettext('newerversionexists');
             }
           }
+          // delete the event when declined (#1670)
+          else if ($status == 'declined' && $delete) {
+             $deleted = $this->driver->remove_event($existing, true);
+             $success = true;
+          }
           // import the (newer) event
           else if ($event['sequence'] >= $existing['sequence'] || (!$event['sequence']
                     && (!$this->rc->config->get('calendar_itip_dtstampcheck', false) || $event['changed'] >= $existing['changed']))) {
             $event['id'] = $existing['id'];
             $event['calendar'] = $existing['calendar'];
+            if ($status == 'declined')  // show me as free when declined (#1670)
+              $event['free_busy'] = 'free';
             $success = $this->driver->edit_event($event);
           }
           else if (!empty($status)) {
             $existing['attendees'] = $event['attendees'];
+            if ($status == 'declined')  // show me as free when declined (#1670)
+              $existing['free_busy'] = 'free';
             $success = $this->driver->edit_event($existing);
           }
           else
@@ -1919,8 +1930,9 @@ class calendar extends rcube_plugin
     }
 
     if ($success) {
-      $message = $this->ical->method == 'REPLY' ? 'attendeupdateesuccess' : 'importedsuccessfully';
+      $message = $this->ical->method == 'REPLY' ? 'attendeupdateesuccess' : ($deleted ? 'successremoval' : 'importedsuccessfully');
       $this->rc->output->command('display_message', $this->gettext(array('name' => $message, 'vars' => array('calendar' => $calendar['name']))), 'confirmation');
+      $this->rc->output->command('plugin.fetch_event_rsvp_status', array('uid' => $event['uid'], 'changed' => $event['changed']->format('U'), 'sequence' => intval($event['sequence']), 'fallback' => strtoupper($status)));
       $error_msg = null;
     }
     else if ($error_msg)
