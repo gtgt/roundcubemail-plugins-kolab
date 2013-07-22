@@ -712,7 +712,8 @@ class calendar extends rcube_plugin
           $event['changed'] = new DateTime('@'.$event['changed']);
         $this->load_driver();
         if ($existing = $this->driver->get_event($event, true, false, true)) {
-          $latest = ($event['sequence'] && $existing['sequence'] == $event['sequence']) || (!$event['sequence'] && $existing['changed'] && $existing['changed'] >= $event['changed']);
+          $latest = ($event['sequence'] && $existing['sequence'] == $event['sequence'])
+              || (!$event['sequence'] && $existing['changed'] && $this->rc->config->get('calendar_itip_dtstampcheck', false) && $existing['changed'] >= $event['changed']);
           $emails = $this->get_user_emails();
           foreach ($existing['attendees'] as $i => $attendee) {
             if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
