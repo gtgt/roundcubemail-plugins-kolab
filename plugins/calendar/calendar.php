@@ -708,8 +708,6 @@ class calendar extends rcube_plugin
         $status = $event['fallback'];
         $latest = false;
         $html = html::div('rsvp-status', $status != 'CANCELLED' ? $this->gettext('acceptinvitation') : '');
-        if (is_numeric($event['changed']))
-          $event['changed'] = new DateTime('@'.$event['changed']);
         $this->load_driver();
         if ($existing = $this->driver->get_event($event, true, false, true)) {
           $latest = ($event['sequence'] && $existing['sequence'] == $event['sequence'])
@@ -1938,7 +1936,7 @@ class calendar extends rcube_plugin
     if ($success) {
       $message = $this->ical->method == 'REPLY' ? 'attendeupdateesuccess' : ($deleted ? 'successremoval' : 'importedsuccessfully');
       $this->rc->output->command('display_message', $this->gettext(array('name' => $message, 'vars' => array('calendar' => $calendar['name']))), 'confirmation');
-      $this->rc->output->command('plugin.fetch_event_rsvp_status', array('uid' => $event['uid'], 'changed' => $event['changed']->format('U'), 'sequence' => intval($event['sequence']), 'fallback' => strtoupper($status)));
+      $this->rc->output->command('plugin.fetch_event_rsvp_status', array('uid' => $event['uid'], 'changed' => $event['changed'], 'sequence' => intval($event['sequence']), 'fallback' => strtoupper($status)));
       $error_msg = null;
     }
     else if ($error_msg)
