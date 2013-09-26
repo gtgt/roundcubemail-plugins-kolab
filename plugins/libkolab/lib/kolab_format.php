@@ -307,7 +307,7 @@ abstract class kolab_format
         }
         catch (Exception $e) {
             rcube::raise_error($e, true);
-            console($xml);
+            rcube::console($xml);
         }
     }
 
