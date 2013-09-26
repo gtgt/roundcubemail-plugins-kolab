@@ -124,6 +124,7 @@ class kolab_driver extends calendar_driver
         'default'  => $cal->storage->default,
         'active'   => $cal->storage->is_subscribed(),
         'owner'    => $cal->get_owner(),
+        'children' => true,  // TODO: determine if that folder indeed has child folders
       );
     }
 
