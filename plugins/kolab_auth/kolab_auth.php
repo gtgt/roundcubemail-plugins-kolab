@@ -365,6 +365,7 @@ class kolab_auth extends rcube_plugin
 
         // Store UID in session for use by other plugins
         $_SESSION['kolab_uid'] = is_array($record['uid']) ? $record['uid'][0] : $record['uid'];
+        $_SESSION['kolab_dn']  = rcube_ldap::dn_decode($record['ID']);
 
         // Set user login
         if ($login_attr) {
