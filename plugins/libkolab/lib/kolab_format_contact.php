@@ -174,6 +174,11 @@ class kolab_format_contact extends kolab_format
             $this->kolab_object[$col] = join('; ', $values);
         }
 
+        // notes/body can be an array from vcard import (OTRS #1000356)
+        if (is_array($this->kolab_object['body'])) {
+            $this->kolab_object['body'] = join("\n", $this->kolab_object['body']);
+        }
+
         // save email addresses as simple-person attributes
         $emails = array();
         foreach ((array)$object['email'] as $email) {
