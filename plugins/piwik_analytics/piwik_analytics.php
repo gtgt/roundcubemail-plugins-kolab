@@ -20,13 +20,13 @@ class piwik_analytics extends rcube_plugin
 {
     function init()
     {
-        if (file_exists(dirname(__FILE__) . "/config.inc.php")) {
+        if (file_exists(__DIR__ . "/config.inc.php")) {
             $this->load_config('config.inc.php');
-        } elseif (file_exists(dirname(__FILE__) . "/config.inc.php.dist")) {
+        } elseif (file_exists(__DIR__ . "/config.inc.php.dist")) {
             $this->load_config('config.inc.php.dist');
-        } elseif (file_exists(dirname(__FILE__) . "/config/config.inc.php")) {
+        } elseif (file_exists(__DIR__ . "/config/config.inc.php")) {
             $this->load_config('config/config.inc.php');
-        } elseif (file_exists(dirname(__FILE__) . "/config/config.inc.php.dist")) {
+        } elseif (file_exists(__DIR__ . "/config/config.inc.php.dist")) {
             $this->load_config('config/config.inc.php.dist');
         /* } else {
             error_log("Cannot find / load configuration for plugin piwik_analytics"); */
@@ -35,7 +35,8 @@ class piwik_analytics extends rcube_plugin
         $this->add_hook('render_page', array($this, 'add_script'));
     }
 
-    function add_script($args) {
+    function add_script($args)
+    {
         $rcmail = rcube::get_instance();
 
         $exclude = $rcmail->config->get('piwik_analytics_exclude');
@@ -43,7 +44,7 @@ class piwik_analytics extends rcube_plugin
         if (empty($exclude) || !is_array($exclude)) {
             $exclude = Array();
         }
-    
+
         if (isset($exclude[$args['template']])) {
             return $args;
         }
@@ -53,7 +54,7 @@ class piwik_analytics extends rcube_plugin
                 return $args;
             }
         }
-    
+
         if (!$rcmail->config->get('piwik_analytics_url', false)) {
             return $args;
         }
@@ -72,12 +73,10 @@ class piwik_analytics extends rcube_plugin
   } catch( err ) {}
 </script><noscript><p><img src="http://' . $rcmail->config->get('piwik_analytics_url') . '/piwik.php?idsite=' . $rcmail->config->get('piwik_analytics_id') . '" style="border:0" alt="" /></p></noscript>
 <!-- End Piwik Tag -->';
-    
+
         // add script to end of page
         $rcmail->output->add_footer($script);
-     
+
         return $args;
     }
 }
-
-?>

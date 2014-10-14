@@ -52,17 +52,17 @@ class kolab_driver extends calendar_driver
     $cal->require_plugin('libkolab');
 
     // load helper classes *after* libkolab has been loaded (#3248)
-    require_once(dirname(__FILE__) . '/kolab_calendar.php');
-    require_once(dirname(__FILE__) . '/kolab_user_calendar.php');
-    require_once(dirname(__FILE__) . '/kolab_invitation_calendar.php');
+    require_once __DIR__ . '/kolab_calendar.php';
+    require_once __DIR__ . '/kolab_user_calendar.php';
+    require_once __DIR__ . '/kolab_invitation_calendar.php';
 
     $this->cal = $cal;
     $this->rc = $cal->rc;
     $this->_read_calendars();
-    
+
     $this->cal->register_action('push-freebusy', array($this, 'push_freebusy'));
     $this->cal->register_action('calendar-acl', array($this, 'calendar_acl'));
-    
+
     $this->freebusy_trigger = $this->rc->config->get('calendar_freebusy_trigger', false);
 
     if (kolab_storage::$version == '2.0') {
