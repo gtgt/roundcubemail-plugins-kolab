@@ -65,7 +65,7 @@ class rcube_kolab_contacts extends rcube_addressbook
                                 'label' => 'kolab_addressbook.pgppublickey'),
       'pkcs7publickey' => array('type' => 'textarea', 'size' => 70, 'rows' => 10, 'limit' => 1,
                                 'label' => 'kolab_addressbook.pkcs7publickey'),
-      'notes'        => array(),
+      'notes'        => array('limit' => 1),
       'photo'        => array(),
       // TODO: define more Kolab-specific fields such as: language, latitude, longitude, crypto settings
     );
@@ -1086,7 +1086,7 @@ class rcube_kolab_contacts extends rcube_addressbook
         // photo is stored as separate attachment
         if ($record['photo'] && strlen($record['photo']) < 255 && ($att = $record['_attachments'][$record['photo']])) {
             // only fetch photo content if requested
-            if ($this->action == 'photo')
+            if ($this->action == 'photo' || $this->action == 'export')
                 $record['photo'] = $att['content'] ? $att['content'] : $this->storagefolder->get_attachment($record['uid'], $att['id']);
         }
 
@@ -1156,6 +1156,13 @@ class rcube_kolab_contacts extends rcube_addressbook
             }
 
             unset($contact['address:'.$type]);
+        }
+
+        // convert array values into single strings (OTRS #1007441)
+        foreach ($this->coltypes as $col => $props) {
+            if ($props['limit'] === 1 && is_array($contact[$col])) {
+                $contact[$col] = $contact[$col][0];
+            }
         }
 
         $contact['website'] = $websites;
