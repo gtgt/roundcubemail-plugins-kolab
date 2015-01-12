@@ -194,6 +194,9 @@ class kolab_storage_cache
                 // determine objects to fetch or to invalidate
                 if (!$imap_index->is_error()) {
                     $imap_index = $imap_index->get();
+                    $new_index  = array();
+                    $old_index  = array();
+                    $rem_index  = array();
 
                     // read cache index
                     $sql_result = $this->db->query(
@@ -201,15 +204,42 @@ class kolab_storage_cache
                         $this->folder_id
                     );
 
-                    $old_index = array();
                     while ($sql_arr = $this->db->fetch_assoc($sql_result)) {
-                        $old_index[] = $sql_arr['msguid'];
+                        $old_index[$sql_arr['msguid']] = $sql_arr['uid'];
                     }
+
+                    // @FIXME: do we need deduplication also on $old_index?
 
                     // fetch new objects from imap
                     $i = 0;
-                    foreach (array_diff($imap_index, $old_index) as $msguid) {
+                    foreach (array_diff($imap_index, array_keys($old_index)) as $msguid) {
                         if ($object = $this->folder->read_object($msguid, '*')) {
+                            // Deduplication: remove older objects with the same UID
+                            // Here we do not resolve conflicts, we just use the most recent version
+                            if ($idx = array_search($object['uid'], $old_index)) {
+                                if ($idx < $msguid) {
+                                    $rem_index[] = $idx;
+                                    unset($old_index[$idx]);
+                                }
+                                else {
+                                    $rem_index[] = $msguid;
+                                    continue;
+                                }
+                            }
+                            else if ($idx = array_search($object['uid'], $new_index)) {
+                                if ($idx < $msguid) {
+                                    $rem_index[] = $idx;
+                                    unset($new_index[$idx]);
+                                }
+                                else {
+                                    $rem_index[] = $msguid;
+                                    continue;
+                                }
+                            }
+
+                            $new_index[$msguid] = $object['uid'];
+
+                            // add to the cache (in multi-record insert if possible)
                             $this->_extended_insert($msguid, $object);
 
                             // check time limit and abort sync if running too long
@@ -222,13 +252,27 @@ class kolab_storage_cache
                     $this->_extended_insert(0, null);
 
                     // delete invalid entries from local DB
-                    $del_index = array_diff($old_index, $imap_index);
+                    $del_index = array_diff(array_keys($old_index), $imap_index);
+                    $del_index = array_merge($del_index, $rem_index);
+
+                    unset($old_index);
+                    unset($new_index);
+
                     if (!empty($del_index)) {
                         $quoted_ids = join(',', array_map(array($this->db, 'quote'), $del_index));
                         $this->db->query(
                             "DELETE FROM `{$this->cache_table}` WHERE `folder_id` = ? AND `msguid` IN ($quoted_ids)",
                             $this->folder_id
                         );
+                    }
+
+                    // remove duplicated objects from imap store
+                    $rem_index = array_intersect($rem_index, $imap_index);
+
+                    if (!empty($rem_index)) {
+                        // @FIXME: should we expunge the messages?
+                        // I suppose just tagging as deleted is enough and more safe
+                        $this->imap->set_flag(join(',', $rem_index), 'DELETED', $this->folder->name);
                     }
 
                     // update ctag value (will be written to database in _sync_unlock())
