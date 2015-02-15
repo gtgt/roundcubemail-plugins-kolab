@@ -57,6 +57,35 @@ $config['kolab_auth_admin_rights'] = array(
     '*'               => 'entry:read',
 );
 
+// Enable plugins on LDAP dn basis. This can be used to enable plugins based
+// only on certain LDAP trees. This can useful in multi domain (ldap) environments
+// or if you organize your member in Organizational Units rather then roles.
+$config['kolab_auth_dn_plugins'] = Array(
+        'dc=example,dc=org' => Array(
+                'acl',
+            ),
+        'dc=example,dc=net' => Array(
+                'converse',
+            ),
+    );
+
+// Settings on a user dn basis. In this example, the 'htmleditor' setting
+// is enabled(1) for people that are stored within the LDAP base dn
+// 'ou=Developer,ou=People,dc=example,dc=org' and it cannot be overridden.
+// Sample use-case: disable htmleditor for normal people, do not allow the
+// setting to be controlled through the preferences, enable the html editor
+// for professional users and allow them to override the setting in the
+// preferences.
+$config['kolab_auth_dn_settings'] = Array(
+        'ou=Developer,ou=People,dc=example,dc=org' => Array(
+                'htmleditor' => Array(
+                        'mode' => 'override',
+                        'value' => 1,
+                        'allow_override' => true
+                    ),
+            ),
+    );
+
 // Enable plugins on a role-by-role basis. In this example, the 'acl' plugin
 // is enabled for people with a 'cn=professional-user,dc=mykolab,dc=ch' role.
 //

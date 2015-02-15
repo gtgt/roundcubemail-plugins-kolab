@@ -107,6 +107,7 @@ class kolab_auth extends rcube_plugin
         }
 
         // load per-user settings
+        $this->load_user_dn_plugins_and_settings();
         $this->load_user_role_plugins_and_settings();
 
         return $args;
@@ -153,6 +154,103 @@ class kolab_auth extends rcube_plugin
 
         return $config;
     }
+
+    /**
+     * Modifies list of plugins and settings according to
+     * specified LDAP DNs
+     */
+    public function load_user_dn_plugins_and_settings()
+    {
+        if (empty($_SESSION['kolab_dn'])) {
+            return;
+        }
+
+        $rcmail = rcube::get_instance();
+
+        // Example 'kolab_auth_dn_plugins' =
+        //
+        //  Array(
+        //      '<dn>' => Array('plugin1', 'plugin2'),
+        //  );
+        //
+        // NOTE that <dn> may in fact be something like: 'ou=People,%dc'
+
+        $dn_plugins = $rcmail->config->get('kolab_auth_dn_plugins');
+
+        // Example $rcmail_config['kolab_auth_dn_settings'] =
+        //
+        //  Array(
+        //      '<dn>' => Array(
+        //          '$setting' => Array(
+        //              'mode' => '(override|merge)', (default: override)
+        //              'value' => <>,
+        //              'allow_override' => (true|false) (default: false)
+        //          ),
+        //      ),
+        //  );
+        //
+        // NOTE that <dn> may in fact be something like: 'ou=People,%dc'
+
+        $dn_settings = $rcmail->config->get('kolab_auth_dn_settings');
+
+        if(empty($dn_plugins) && empty($dn_settings)) {
+            return;
+        }
+
+        if (!empty($dn_plugins)) {
+            foreach ($dn_plugins as $dn => $plugins) {
+                $dn = self::parse_ldap_vars($dn);
+                if (!empty($dn_plugins[$dn])) {
+                    $dn_plugins[$dn] = array_unique(array_merge((array)$dn_plugins[$dn], $plugins));
+                } else {
+                    $dn_plugins[$dn] = $plugins;
+                }
+            }
+        }
+
+        if (!empty($dn_settings)) {
+            foreach ($dn_settings as $dn => $settings) {
+                $dn = self::parse_ldap_vars($dn);
+                if (!empty($dn_settings[$dn])) {
+                    $dn_settings[$dn] = array_merge((array)$dn_settings[$dn], $settings);
+                } else {
+                    $dn_settings[$dn] = $settings;
+                }
+            }
+        }
+
+        // go apply settings
+        if (is_array($dn_settings)) {
+            foreach($dn_settings AS $dn => $settings) {
+                // contine foreach of settings are empty
+                if (empty($settings) || !is_array($settings)) {
+                    continue;
+                }
+
+                // the end of the user's dn doesn't match the search dn
+                if (substr($_SESSION['kolab_dn'],strlen($dn)*-1) != $dn) {
+                    continue;
+                }
+
+                $this->apply_loaded_settings($settings);
+            }
+        }
+
+        // load plugins if user dn matches search dn
+        if (is_array($dn_plugins)) {
+            foreach($dn_plugins AS $dn => $plugins) {
+                // the end of the user's dn doesn't match the search dn
+                if (substr($_SESSION['kolab_dn'],strlen($dn)*-1) != $dn) {
+                    continue;
+                }
+
+                foreach ((array)$plugins as $plugin) {
+                    $this->api->load_plugin($plugin);
+                }
+            }
+        }
+    }
+
 
     /**
      * Modifies list of plugins and settings according to
@@ -216,54 +314,64 @@ class kolab_auth extends rcube_plugin
 
         foreach ($_SESSION['user_roledns'] as $role_dn) {
             if (!empty($role_settings[$role_dn]) && is_array($role_settings[$role_dn])) {
-                foreach ($role_settings[$role_dn] as $setting_name => $setting) {
-                    if (!isset($setting['mode'])) {
-                        $setting['mode'] = 'override';
-                    }
-
-                    if ($setting['mode'] == "override") {
-                        $rcmail->config->set($setting_name, $setting['value']);
-                    } elseif ($setting['mode'] == "merge") {
-                        $orig_setting = $rcmail->config->get($setting_name);
-
-                        if (!empty($orig_setting)) {
-                            if (is_array($orig_setting)) {
-                                $rcmail->config->set($setting_name, array_merge($orig_setting, $setting['value']));
-                            }
-                        } else {
-                            $rcmail->config->set($setting_name, $setting['value']);
-                        }
-                    }
-
-                    $dont_override = (array) $rcmail->config->get('dont_override');
-
-                    if (empty($setting['allow_override'])) {
-                        $rcmail->config->set('dont_override', array_merge($dont_override, array($setting_name)));
-                    }
-                    else {
-                        if (in_array($setting_name, $dont_override)) {
-                            $_dont_override = array();
-                            foreach ($dont_override as $_setting) {
-                                if ($_setting != $setting_name) {
-                                    $_dont_override[] = $_setting;
-                                }
-                            }
-                            $rcmail->config->set('dont_override', $_dont_override);
-                        }
-                    }
-
-                    if ($setting_name == 'skin') {
-                        if ($rcmail->output->type == 'html') {
-                            $rcmail->output->set_skin($setting['value']);
-                            $rcmail->output->set_env('skin', $setting['value']);
-                        }
-                    }
-                }
+                $this->apply_loaded_settings($role_settings[$role_dn]);
             }
 
             if (!empty($role_plugins[$role_dn])) {
                 foreach ((array)$role_plugins[$role_dn] as $plugin) {
                     $this->api->load_plugin($plugin);
+                }
+            }
+        }
+    }
+
+    /**
+     * apply settings that have been loaded
+     */
+    private function apply_loaded_settings(array $settings)
+    {
+        $rcmail = rcube::get_instance();
+
+        foreach ($settings as $setting_name => $setting) {
+            if (!isset($setting['mode'])) {
+                $setting['mode'] = 'override';
+            }
+
+            if ($setting['mode'] == "override") {
+                $rcmail->config->set($setting_name, $setting['value']);
+            } elseif ($setting['mode'] == "merge") {
+                $orig_setting = $rcmail->config->get($setting_name);
+
+                if (!empty($orig_setting)) {
+                    if (is_array($orig_setting)) {
+                        $rcmail->config->set($setting_name, array_merge($orig_setting, $setting['value']));
+                    }
+                } else {
+                    $rcmail->config->set($setting_name, $setting['value']);
+                }
+            }
+
+            $dont_override = (array) $rcmail->config->get('dont_override');
+
+            if (empty($setting['allow_override'])) {
+                $rcmail->config->set('dont_override', array_merge($dont_override, array($setting_name)));
+            }
+            else {
+                if (in_array($setting_name, $dont_override)) {
+                    $_dont_override = array();
+                    foreach ($dont_override as $_setting) {
+                        if ($_setting != $setting_name) {
+                            $_dont_override[] = $_setting;
+                        }
+                    }
+                    $rcmail->config->set('dont_override', $_dont_override);
+                }
+            }
+
+            if ($setting_name == 'skin') {
+                if ($rcmail->output->type == 'html') {
+                    $rcmail->output->set_skin($setting['value']);
+                    $rcmail->output->set_env('skin', $setting['value']);
                 }
             }
         }
