@@ -193,7 +193,7 @@ class kolab_auth extends rcube_plugin
 
         $dn_settings = $rcmail->config->get('kolab_auth_dn_settings');
 
-        if(empty($dn_plugins) && empty($dn_settings)) {
+        if (empty($dn_plugins) && empty($dn_settings)) {
             return;
         }
 
@@ -221,7 +221,7 @@ class kolab_auth extends rcube_plugin
 
         // go apply settings
         if (is_array($dn_settings)) {
-            foreach($dn_settings AS $dn => $settings) {
+            foreach ($dn_settings AS $dn => $settings) {
                 // contine foreach of settings are empty
                 if (empty($settings) || !is_array($settings)) {
                     continue;
@@ -238,7 +238,7 @@ class kolab_auth extends rcube_plugin
 
         // load plugins if user dn matches search dn
         if (is_array($dn_plugins)) {
-            foreach($dn_plugins AS $dn => $plugins) {
+            foreach ($dn_plugins AS $dn => $plugins) {
                 // the end of the user's dn doesn't match the search dn
                 if (substr($_SESSION['kolab_dn'],strlen($dn)*-1) != $dn) {
                     continue;
