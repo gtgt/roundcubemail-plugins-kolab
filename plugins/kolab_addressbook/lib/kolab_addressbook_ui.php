@@ -43,7 +43,7 @@ class kolab_addressbook_ui
      */
     private function init_ui()
     {
-        if (!empty($this->rc->action) && !preg_match('/^plugin\.book/', $this->rc->action)) {
+        if (!empty($this->rc->action) && !preg_match('/^plugin\.book/', $this->rc->action) && $this->rc->action != 'show') {
             return;
         }
 
@@ -63,9 +63,21 @@ class kolab_addressbook_ui
             $options = array('book-create', 'book-edit', 'book-delete', 'book-remove');
             $idx     = 0;
 
-            if ($this->rc->config->get('kolab_addressbook_carddav_url')) {
+            if ($dav_url = $this->rc->config->get('kolab_addressbook_carddav_url')) {
               $options[] = 'book-showurl';
               $this->rc->output->set_env('kolab_addressbook_carddav_url', true);
+
+              // set CardDAV URI for specified ldap addressbook
+              if ($ldap_abook = $this->rc->config->get('kolab_addressbook_carddav_ldap')) {
+                $dav_ldap_url = strtr($dav_url, array(
+                    '%h' => $_SERVER['HTTP_HOST'],
+                    '%u' => urlencode($this->rc->get_user_name()),
+                    '%i' => 'ldap-directory',
+                    '%n' => '',
+                ));
+                $this->rc->output->set_env('kolab_addressbook_carddav_ldap', $ldap_abook);
+                $this->rc->output->set_env('kolab_addressbook_carddav_ldap_url', $dav_ldap_url);
+              }
             }
 
             foreach ($options as $command) {
@@ -105,6 +117,29 @@ class kolab_addressbook_ui
                 'kolab_addressbook.noaddressbooksfound',
                 'kolab_addressbook.foldersubscribe',
                 'resetsearch');
+
+
+            if ($this->plugin->bonnie_api) {
+                $this->rc->output->set_env('kolab_audit_trail', true);
+                $this->plugin->api->include_script('libkolab/js/audittrail.js');
+
+                $this->rc->output->add_label(
+                    'kolab_addressbook.showhistory',
+                    'kolab_addressbook.objectchangelog',
+                    'kolab_addressbook.objectdiff',
+                    'kolab_addressbook.objectdiffnotavailable',
+                    'kolab_addressbook.objectchangelognotavailable',
+                    'kolab_addressbook.revisionrestoreconfirm'
+                );
+
+                $this->plugin->add_hook('render_page', array($this, 'render_audittrail_page'));
+                $this->plugin->register_handler('plugin.object_changelog_table', array('libkolab', 'object_changelog_table'));
+            }
+        }
+        // include stylesheet for audit trail
+        else if ($this->rc->action == 'show' && $this->plugin->bonnie_api) {
+            $this->plugin->include_stylesheet($this->plugin->local_skin_path().'/kolab_addressbook.css');
+            $this->rc->output->add_label('kolab_addressbook.showhistory');
         }
         // book create/edit form
         else {
@@ -138,7 +173,7 @@ class kolab_addressbook_ui
 
         $hidden_fields[] = array('name' => '_source', 'value' => $folder);
 
-        $folder  = rcube_charset::convert($folder, RCMAIL_CHARSET, 'UTF7-IMAP');
+        $folder  = rcube_charset::convert($folder, RCUBE_CHARSET, 'UTF7-IMAP');
         $storage = $this->rc->get_storage();
         $delim   = $storage->get_hierarchy_delimiter();
 
@@ -178,7 +213,7 @@ class kolab_addressbook_ui
         );
 
         if (!empty($options) && ($options['norename'] || $options['protected'])) {
-            $foldername = Q(str_replace($delim, ' &raquo; ', kolab_storage::object_name($folder)));
+            $foldername = rcube::Q(str_replace($delim, ' &raquo; ', kolab_storage::object_name($folder)));
         }
         else {
             $foldername = new html_inputfield(array('name' => '_name', 'id' => '_name', 'size' => 30));
@@ -229,7 +264,7 @@ class kolab_addressbook_ui
                 foreach ($tab['fieldsets'] as $fieldset) {
                     $subcontent = $this->get_form_part($fieldset);
                     if ($subcontent) {
-                        $content .= html::tag('fieldset', null, html::tag('legend', null, Q($fieldset['name'])) . $subcontent) ."\n";
+                        $content .= html::tag('fieldset', null, html::tag('legend', null, rcube::Q($fieldset['name'])) . $subcontent) ."\n";
                     }
                 }
             }
@@ -238,13 +273,27 @@ class kolab_addressbook_ui
             }
 
             if ($content) {
-                $out .= html::tag('fieldset', null, html::tag('legend', null, Q($tab['name'])) . $content) ."\n";
+                $out .= html::tag('fieldset', null, html::tag('legend', null, rcube::Q($tab['name'])) . $content) ."\n";
             }
         }
 
         $out .= "\n$form_end";
 
         return $out;
+    }
+
+    /**
+     *
+     */
+    public function render_audittrail_page($p)
+    {
+        // append audit trail UI elements to contact page
+        if ($p['template'] === 'addressbook' && !$p['kolab-audittrail']) {
+            $this->rc->output->add_footer($this->rc->output->parse('kolab_addressbook.audittrail', false, false));
+            $p['kolab-audittrail'] = true;
+        }
+
+        return $p;
     }
 
 
@@ -256,9 +305,9 @@ class kolab_addressbook_ui
             $table = new html_table(array('cols' => 2, 'class' => 'propform'));
             foreach ($form['content'] as $col => $colprop) {
                 $colprop['id'] = '_'.$col;
-                $label = !empty($colprop['label']) ? $colprop['label'] : rcube_label($col);
+                $label = !empty($colprop['label']) ? $colprop['label'] : $this->rc->gettext($col);
 
-                $table->add('title', sprintf('<label for="%s">%s</label>', $colprop['id'], Q($label)));
+                $table->add('title', sprintf('<label for="%s">%s</label>', $colprop['id'], rcube::Q($label)));
                 $table->add(null, $colprop['value']);
             }
             $content = $table->show();

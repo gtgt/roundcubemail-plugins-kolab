@@ -79,10 +79,6 @@ class kolab_tags extends rcube_plugin
             return;
         }
 
-        if ($this->rc->action == 'print') {
-            return;
-        }
-
         if ($engine = $this->engine()) {
             $engine->ui();
         }
@@ -118,6 +114,10 @@ class kolab_tags extends rcube_plugin
         // this hook can be executed many times
         if ($this->mail_headers_done) {
             return $args;
+        }
+
+        if ($this->rc->action == 'print') {
+            return;
         }
 
         $this->mail_headers_done = true;

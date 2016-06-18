@@ -6,7 +6,7 @@
  * @version @package_version@
  * @author Thomas Bruederli <bruederli@kolabsys.com>
  *
- * Copyright (C) 2012, Kolab Systems AG <contact@kolabsys.com>
+ * Copyright (C) 2012-2015, Kolab Systems AG <contact@kolabsys.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -38,6 +38,7 @@ class tasklist_kolab_driver extends tasklist_driver
     private $folders = array();
     private $tasks   = array();
     private $tags    = array();
+    private $bonnie_api = false;
 
 
     /**
@@ -45,7 +46,7 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function __construct($plugin)
     {
-        $this->rc = $plugin->rc;
+        $this->rc     = $plugin->rc;
         $this->plugin = $plugin;
 
         if (kolab_storage::$version == '2.0') {
@@ -55,7 +56,8 @@ class tasklist_kolab_driver extends tasklist_driver
         // tasklist use fully encoded identifiers
         kolab_storage::$encode_ids = true;
 
-        $this->_read_lists();
+        // get configuration for the Bonnie API
+        $this->bonnie_api = libkolab::get_bonnie_api();
 
         $this->plugin->register_action('folder-acl', array($this, 'folder_acl'));
     }
@@ -66,8 +68,9 @@ class tasklist_kolab_driver extends tasklist_driver
     private function _read_lists($force = false)
     {
         // already read sources
-        if (isset($this->lists) && !$force)
+        if (isset($this->lists) && !$force) {
             return $this->lists;
+        }
 
         // get all folders that have type "task"
         $folders = kolab_storage::sort_folders(kolab_storage::get_folders('task'));
@@ -98,6 +101,8 @@ class tasklist_kolab_driver extends tasklist_driver
             $this->folders[$tasklist['id']] = $folder;
             $this->folders[$folder->name] = $folder;
         }
+
+        return $this->lists;
     }
 
     /**
@@ -107,15 +112,18 @@ class tasklist_kolab_driver extends tasklist_driver
     {
         if ($folder->get_namespace() == 'personal') {
             $norename = false;
-            $readonly = false;
+            $editable = true;
+            $rights = 'lrswikxtea';
             $alarms = true;
         }
         else {
             $alarms = false;
-            $readonly = true;
-            if (($rights = $folder->get_myrights()) && !PEAR::isError($rights)) {
-                if (strpos($rights, 'i') !== false)
-                  $readonly = false;
+            $rights = 'lr';
+            $editable = false;
+            if (($myrights = $folder->get_myrights()) && !PEAR::isError($myrights)) {
+                $rights = $myrights;
+                if (strpos($rights, 't') !== false || strpos($rights, 'd') !== false)
+                    $editable = strpos($rights, 'i');
             }
             $info = $folder->get_folder_info();
             $norename = $readonly || $info['norename'] || $info['protected'];
@@ -135,7 +143,8 @@ class tasklist_kolab_driver extends tasklist_driver
             'editname' => $folder->get_foldername(),
             'color' => $folder->get_color('0000CC'),
             'showalarms' => isset($prefs[$list_id]['showalarms']) ? $prefs[$list_id]['showalarms'] : $alarms,
-            'editable' => !$readonly,
+            'editable' => $editable,
+            'rights'    => $rights,
             'norename' => $norename,
             'active' => $folder->is_active(),
             'parentfolder' => $folder->get_parent(),
@@ -147,6 +156,8 @@ class tasklist_kolab_driver extends tasklist_driver
             'subtype'  => $folder->subtype,
             'group' => $folder->default ? 'default' : $folder->get_namespace(),
             'class' => trim($folder->get_namespace() . ($folder->default ? ' default' : '')),
+            'caldavuid' => $folder->get_uid(),
+            'history' => !empty($this->bonnie_api),
         );
     }
 
@@ -155,6 +166,8 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function get_lists(&$tree = null)
     {
+        $this->_read_lists();
+
         // attempt to create a default list for this user
         if (empty($this->lists) && !isset($this->search_more_results)) {
             $prop = array('name' => 'Tasks', 'color' => '0000CC', 'default' => true);
@@ -201,11 +214,12 @@ class tasklist_kolab_driver extends tasklist_driver
             if ($folder instanceof kolab_storage_folder_user) {
                 $lists[$list_id] = array(
                     'id'       => $list_id,
-                    'name'     => $folder->get_name(),
+                    'name'     => $fullname,
                     'listname' => $listname,
                     'title'    => $folder->get_title(),
                     'virtual'  => true,
                     'editable' => false,
+                    'rights'   => 'l',
                     'group'    => 'other virtual',
                     'class'    => 'user',
                     'parent'   => $parent_id,
@@ -214,10 +228,11 @@ class tasklist_kolab_driver extends tasklist_driver
             else if ($folder->virtual) {
                 $lists[$list_id] = array(
                     'id'       => $list_id,
-                    'name'     => kolab_storage::object_name($fullname),
+                    'name'     => $fullname,
                     'listname' => $listname,
                     'virtual'  => true,
                     'editable' => false,
+                    'rights'   => 'l',
                     'group'    => $folder->get_namespace(),
                     'class'    => 'folder',
                     'parent'   => $parent_id,
@@ -244,6 +259,8 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     protected function get_folder($id)
     {
+        $this->_read_lists();
+
         // create list and folder instance if necesary
         if (!$this->lists[$id]) {
             $folder = kolab_storage::get_folder(kolab_storage::id_decode($id));
@@ -373,8 +390,10 @@ class tasklist_kolab_driver extends tasklist_driver
                         ($prop['active'] ? kolab_storage::folder_activate($subfolder) : kolab_storage::folder_deactivate($subfolder));
                 }
             }
+
             return $ret;
         }
+
         return false;
     }
 
@@ -388,10 +407,11 @@ class tasklist_kolab_driver extends tasklist_driver
     public function delete_list($prop)
     {
         if ($prop['id'] && ($folder = $this->get_folder($prop['id']))) {
-          if (kolab_storage::folder_delete($folder->name))
-              return true;
-          else
-              $this->last_error = kolab_storage::$last_error;
+            if (kolab_storage::folder_delete($folder->name)) {
+                return true;
+            }
+
+            $this->last_error = kolab_storage::$last_error;
         }
 
         return false;
@@ -474,21 +494,26 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function count_tasks($lists = null)
     {
-        if (empty($lists))
-            $lists = array_keys($this->lists);
-        else if (is_string($lists))
+        if (empty($lists)) {
+            $lists = $this->_read_lists();
+            $lists = array_keys($lists);
+        }
+        else if (is_string($lists)) {
             $lists = explode(',', $lists);
+        }
 
-        $today_date = new DateTime('now', $this->plugin->timezone);
-        $today = $today_date->format('Y-m-d');
+        $today_date    = new DateTime('now', $this->plugin->timezone);
+        $today         = $today_date->format('Y-m-d');
         $tomorrow_date = new DateTime('now + 1 day', $this->plugin->timezone);
-        $tomorrow = $tomorrow_date->format('Y-m-d');
+        $tomorrow      = $tomorrow_date->format('Y-m-d');
 
         $counts = array('all' => 0, 'flagged' => 0, 'today' => 0, 'tomorrow' => 0, 'overdue' => 0, 'nodate' => 0, 'mytasks' => 0);
+
         foreach ($lists as $list_id) {
             if (!$folder = $this->get_folder($list_id)) {
                 continue;
             }
+
             foreach ($folder->select(array(array('tags','!~','x-complete'))) as $record) {
                 $rec = $this->_to_rcube_task($record, $list_id, false);
 
@@ -518,7 +543,7 @@ class tasklist_kolab_driver extends tasklist_driver
     }
 
     /**
-     * Get all taks records matching the given filter
+     * Get all task records matching the given filter
      *
      * @param array Hash array with filter criterias:
      *  - mask:  Bitmask representing the filter selection (check against tasklist::FILTER_MASK_* constants)
@@ -530,11 +555,15 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function list_tasks($filter, $lists = null)
     {
-        if (empty($lists))
-            $lists = array_keys($this->lists);
-        else if (is_string($lists))
+        if (empty($lists)) {
+            $lists = $this->_read_lists();
+            $lists = array_keys($lists);
+        }
+        else if (is_string($lists)) {
             $lists = explode(',', $lists);
+        }
 
+        $config  = kolab_storage_config::get_instance();
         $results = array();
 
         // query Kolab storage
@@ -556,21 +585,23 @@ class tasklist_kolab_driver extends tasklist_driver
             $query[] = array('changed', '>=', $filter['since']);
         }
 
-        // load all tags into memory first
-        kolab_storage_config::get_instance()->get_tags();
-
         foreach ($lists as $list_id) {
             if (!$folder = $this->get_folder($list_id)) {
                 continue;
             }
+
             foreach ($folder->select($query) as $record) {
-                $this->load_tags($record);
-                $task = $this->_to_rcube_task($record, $list_id);
-
                 // TODO: post-filter tasks returned from storage
-
-                $results[] = $task;
+                $record['list_id'] = $list_id;
+                $results[] = $record;
             }
+        }
+
+        $config->apply_tags($results, true);
+        $config->apply_links($results);
+
+        foreach (array_keys($results) as $idx) {
+            $results[$idx] = $this->_to_rcube_task($results[$idx], $results[$idx]['list_id']);
         }
 
         // avoid session race conditions that will loose temporary subscriptions
@@ -587,7 +618,9 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function get_task($prop)
     {
+        $this->_read_lists();
         $this->_parse_id($prop);
+
         $id      = $prop['uid'];
         $list_id = $prop['list'];
         $folders = $list_id ? array($list_id => $this->get_folder($list_id)) : $this->folders;
@@ -652,6 +685,251 @@ class tasklist_kolab_driver extends tasklist_driver
     }
 
     /**
+     * Provide a list of revisions for the given task
+     *
+     * @param array  $task Hash array with task properties
+     * @return array List of changes, each as a hash array
+     * @see tasklist_driver::get_task_changelog()
+     */
+    public function get_task_changelog($prop)
+    {
+        if (empty($this->bonnie_api)) {
+            return false;
+        }
+
+        list($uid, $mailbox, $msguid) = $this->_resolve_task_identity($prop);
+
+        $result = $uid && $mailbox ? $this->bonnie_api->changelog('task', $uid, $mailbox, $msguid) : null;
+        if (is_array($result) && $result['uid'] == $uid) {
+            return $result['changes'];
+        }
+
+        return false;
+    }
+
+    /**
+     * Return full data of a specific revision of an event
+     *
+     * @param mixed  $task UID string or hash array with task properties
+     * @param mixed  $rev Revision number
+     *
+     * @return array Task object as hash array
+     * @see tasklist_driver::get_task_revision()
+     */
+    public function get_task_revison($prop, $rev)
+    {
+        if (empty($this->bonnie_api)) {
+            return false;
+        }
+
+        $this->_parse_id($prop);
+        $uid     = $prop['uid'];
+        $list_id = $prop['list'];
+        list($uid, $mailbox, $msguid) = $this->_resolve_task_identity($prop);
+
+        // call Bonnie API
+        $result = $this->bonnie_api->get('task', $uid, $rev, $mailbox, $msguid);
+        if (is_array($result) && $result['uid'] == $uid && !empty($result['xml'])) {
+            $format = kolab_format::factory('task');
+            $format->load($result['xml']);
+            $rec = $format->to_array();
+            $format->get_attachments($rec, true);
+
+            if ($format->is_valid()) {
+                $rec = self::_to_rcube_task($rec, $list_id, false);
+                $rec['rev'] = $result['rev'];
+                return $rec;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Command the backend to restore a certain revision of a task.
+     * This shall replace the current object with an older version.
+     *
+     * @param mixed  $task UID string or hash array with task properties
+     * @param mixed  $rev Revision number
+     *
+     * @return boolean True on success, False on failure
+     * @see tasklist_driver::restore_task_revision()
+     */
+    public function restore_task_revision($prop, $rev)
+    {
+        if (empty($this->bonnie_api)) {
+            return false;
+        }
+
+        $this->_parse_id($prop);
+        $uid     = $prop['uid'];
+        $list_id = $prop['list'];
+        list($uid, $mailbox, $msguid) = $this->_resolve_task_identity($prop);
+
+        $folder  = $this->get_folder($list_id);
+        $success = false;
+
+        if ($folder && ($raw_msg = $this->bonnie_api->rawdata('task', $uid, $rev, $mailbox))) {
+            $imap = $this->rc->get_storage();
+
+            // insert $raw_msg as new message
+            if ($imap->save_message($folder->name, $raw_msg, null, false)) {
+                $success = true;
+
+                // delete old revision from imap and cache
+                $imap->delete_message($msguid, $folder->name);
+                $folder->cache->set($msguid, false);
+            }
+        }
+
+        return $success;
+    }
+
+    /**
+     * Get a list of property changes beteen two revisions of a task object
+     *
+     * @param array  $task Hash array with task properties
+     * @param mixed  $rev   Revisions: "from:to"
+     *
+     * @return array List of property changes, each as a hash array
+     * @see tasklist_driver::get_task_diff()
+     */
+    public function get_task_diff($prop, $rev1, $rev2)
+    {
+        $this->_parse_id($prop);
+        $uid     = $prop['uid'];
+        $list_id = $prop['list'];
+        list($uid, $mailbox, $msguid) = $this->_resolve_task_identity($prop);
+
+        // call Bonnie API
+        $result = $this->bonnie_api->diff('task', $uid, $rev1, $rev2, $mailbox, $msguid, $instance_id);
+        if (is_array($result) && $result['uid'] == $uid) {
+            $result['rev1'] = $rev1;
+            $result['rev2'] = $rev2;
+
+            $keymap = array(
+                'start'    => 'start',
+                'due'      => 'date',
+                'dstamp'   => 'changed',
+                'summary'  => 'title',
+                'alarm'    => 'alarms',
+                'attendee' => 'attendees',
+                'attach'   => 'attachments',
+                'rrule'    => 'recurrence',
+                'related-to' => 'parent_id',
+                'percent-complete' => 'complete',
+                'lastmodified-date' => 'changed',
+            );
+            $prop_keymaps = array(
+                'attachments' => array('fmttype' => 'mimetype', 'label' => 'name'),
+                'attendees'   => array('partstat' => 'status'),
+            );
+            $special_changes = array();
+
+            // map kolab event properties to keys the client expects
+            array_walk($result['changes'], function(&$change, $i) use ($keymap, $prop_keymaps, $special_changes) {
+                if (array_key_exists($change['property'], $keymap)) {
+                    $change['property'] = $keymap[$change['property']];
+                }
+                if ($change['property'] == 'priority') {
+                    $change['property'] = 'flagged';
+                    $change['old'] = $change['old'] == 1 ? $this->plugin->gettext('yes') : null;
+                    $change['new'] = $change['new'] == 1 ? $this->plugin->gettext('yes') : null;
+                }
+                // map alarms trigger value
+                if ($change['property'] == 'alarms') {
+                    if (is_array($change['old']) && is_array($change['old']['trigger']))
+                        $change['old']['trigger'] = $change['old']['trigger']['value'];
+                    if (is_array($change['new']) && is_array($change['new']['trigger']))
+                        $change['new']['trigger'] = $change['new']['trigger']['value'];
+                }
+                // make all property keys uppercase
+                if ($change['property'] == 'recurrence') {
+                    $special_changes['recurrence'] = $i;
+                    foreach (array('old','new') as $m) {
+                        if (is_array($change[$m])) {
+                            $props = array();
+                            foreach ($change[$m] as $k => $v) {
+                                $props[strtoupper($k)] = $v;
+                            }
+                            $change[$m] = $props;
+                        }
+                    }
+                }
+                // map property keys names
+                if (is_array($prop_keymaps[$change['property']])) {
+                  foreach ($prop_keymaps[$change['property']] as $k => $dest) {
+                    if (is_array($change['old']) && array_key_exists($k, $change['old'])) {
+                        $change['old'][$dest] = $change['old'][$k];
+                        unset($change['old'][$k]);
+                    }
+                    if (is_array($change['new']) && array_key_exists($k, $change['new'])) {
+                        $change['new'][$dest] = $change['new'][$k];
+                        unset($change['new'][$k]);
+                    }
+                  }
+                }
+
+                if ($change['property'] == 'exdate') {
+                    $special_changes['exdate'] = $i;
+                }
+                else if ($change['property'] == 'rdate') {
+                    $special_changes['rdate'] = $i;
+                }
+            });
+
+            // merge some recurrence changes
+            foreach (array('exdate','rdate') as $prop) {
+                if (array_key_exists($prop, $special_changes)) {
+                    $exdate = $result['changes'][$special_changes[$prop]];
+                    if (array_key_exists('recurrence', $special_changes)) {
+                        $recurrence = &$result['changes'][$special_changes['recurrence']];
+                    }
+                    else {
+                        $i = count($result['changes']);
+                        $result['changes'][$i] = array('property' => 'recurrence', 'old' => array(), 'new' => array());
+                        $recurrence = &$result['changes'][$i]['recurrence'];
+                    }
+                    $key = strtoupper($prop);
+                    $recurrence['old'][$key] = $exdate['old'];
+                    $recurrence['new'][$key] = $exdate['new'];
+                    unset($result['changes'][$special_changes[$prop]]);
+                }
+            }
+
+            return $result;
+        }
+
+        return false;
+    }
+
+    /**
+     * Helper method to resolved the given task identifier into uid and folder
+     *
+     * @return array (uid,folder,msguid) tuple
+     */
+    private function _resolve_task_identity($prop)
+    {
+        $mailbox = $msguid = null;
+
+        $this->_parse_id($prop);
+        $uid     = $prop['uid'];
+        $list_id = $prop['list'];
+
+        if ($folder = $this->get_folder($list_id)) {
+            $mailbox = $folder->get_mailbox_id();
+
+            // get task object from storage in order to get the real object uid an msguid
+            if ($rec = $folder->get_object($uid)) {
+                $msguid = $rec['_msguid'];
+                $uid = $rec['uid'];
+            }
+        }
+
+        return array($uid, $mailbox, $msguid);
+    }
+
+    /**
      * Get a list of pending alarms to be displayed to the user
      *
      * @param  integer Current time (unix timestamp)
@@ -680,7 +958,13 @@ class tasklist_kolab_driver extends tasklist_driver
         $time = $slot + $interval;
 
         $candidates = array();
-        $query = array(array('tags', '=', 'x-has-alarms'), array('tags', '!=', 'x-complete'));
+        $query      = array(
+            array('tags', '=', 'x-has-alarms'),
+            array('tags', '!=', 'x-complete')
+        );
+
+        $this->_read_lists();
+
         foreach ($this->lists as $lid => $list) {
             // skip lists with alarms disabled
             if (!$list['showalarms'] || ($lists && !in_array($lid, $lists)))
@@ -833,14 +1117,8 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     private function save_links($uid, $links)
     {
-        // make sure we have a valid array
-        if (empty($links)) {
-            $links = array();
-        }
-
         $config = kolab_storage_config::get_instance();
-        $remove = array_diff($config->get_object_links($uid), $links);
-        return $config->save_object_links($uid, $links, $remove);
+        return $config->save_object_links($uid, (array) $links);
     }
 
     /**
@@ -913,10 +1191,11 @@ class tasklist_kolab_driver extends tasklist_driver
             'sequence' => $record['sequence'],
             'tags' => $record['tags'],
             'list' => $list_id,
+            'links' => $record['links'],
         );
 
         // we can sometimes skip this expensive operation
-        if ($all) {
+        if ($all && !array_key_exists('links', $task)) {
             $task['links'] = $this->get_links($task['uid']);
         }
 
@@ -980,7 +1259,7 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     private function _from_rcube_task($task, $old = array())
     {
-        $object = $task;
+        $object    = $task;
         $id_prefix = $task['list'] . ':';
 
         if (!empty($task['date'])) {
@@ -995,6 +1274,13 @@ class tasklist_kolab_driver extends tasklist_driver
             if (empty($task['starttime']))
                 $object['start']->_dateonly = true;
             unset($object['startdate']);
+        }
+
+        // as per RFC (and the Kolab schema validation), start and due dates need to be of the same type (#3614)
+        // this should be catched in the client already but just make sure we don't write invalid objects
+        if (!empty($object['start']) && !empty($object['due']) && $object['due']->_dateonly != $object['start']->_dateonly) {
+            $object['start']->_dateonly = true;
+            $object['due']->_dateonly = true;
         }
 
         $object['complete'] = $task['complete'] * 100;
@@ -1022,52 +1308,14 @@ class tasklist_kolab_driver extends tasklist_driver
             $object['recurrence'] = $old['recurrence'];
         }
 
-        // delete existing attachment(s)
-        if (!empty($task['deleted_attachments'])) {
-            foreach ($task['deleted_attachments'] as $attachment) {
-                if (is_array($object['_attachments'])) {
-                    foreach ($object['_attachments'] as $idx => $att) {
-                        if ($att['id'] == $attachment)
-                            $object['_attachments'][$idx] = false;
-                    }
-                }
-            }
-            unset($task['deleted_attachments']);
-        }
-
-        // in kolab_storage attachments are indexed by content-id
-        if (is_array($task['attachments'])) {
-            foreach ($task['attachments'] as $idx => $attachment) {
-                $key = null;
-                // Roundcube ID has nothing to do with the storage ID, remove it
-                if ($attachment['content'] || $attachment['path']) {
-                    unset($attachment['id']);
-                }
-                else {
-                    foreach ((array)$old['_attachments'] as $cid => $oldatt) {
-                        if ($oldatt && $attachment['id'] == $oldatt['id'])
-                            $key = $cid;
-                    }
-                }
-
-                // replace existing entry
-                if ($key) {
-                    $object['_attachments'][$key] = $attachment;
-                }
-                // append as new attachment
-                else {
-                    $object['_attachments'][] = $attachment;
-                }
-            }
-
-            unset($object['attachments']);
-        }
+        unset($task['attachments']);
+        kolab_format::merge_attachments($object, $old);
 
         // allow sequence increments if I'm the organizer
-        if ($this->plugin->is_organizer($object)) {
+        if ($this->plugin->is_organizer($object) && empty($object['_method'])) {
             unset($object['sequence']);
         }
-        else if (isset($old['sequence'])) {
+        else if (isset($old['sequence']) && empty($object['_method'])) {
             $object['sequence'] = $old['sequence'];
         }
 
@@ -1096,12 +1344,18 @@ class tasklist_kolab_driver extends tasklist_driver
     {
         $this->_parse_id($task);
         $list_id = $task['list'];
-        if (!$list_id || !($folder = $this->get_folder($list_id)))
+        if (!$list_id || !($folder = $this->get_folder($list_id))) {
+            rcube::raise_error(array(
+                'code' => 600, 'type' => 'php',
+                'file' => __FILE__, 'line' => __LINE__,
+                'message' => "Invalid list identifer to save task: " . print_r($list_id, true)),
+                true, false);
             return false;
+        }
 
         // email links and tags are stored separately
         $links = $task['links'];
-        $tags = $task['tags'];
+        $tags  = $task['tags'];
         unset($task['tags'], $task['links']);
 
         // moved from another folder
@@ -1128,7 +1382,7 @@ class tasklist_kolab_driver extends tasklist_driver
         $saved  = $folder->save($object, 'task', $task['uid']);
 
         if (!$saved) {
-            raise_error(array(
+            rcube::raise_error(array(
                 'code' => 600, 'type' => 'php',
                 'file' => __FILE__, 'line' => __LINE__,
                 'message' => "Error saving task object to Kolab server"),
@@ -1218,6 +1472,7 @@ class tasklist_kolab_driver extends tasklist_driver
      * @param array  $task  Hash array with event properties:
      *         id: Task identifier
      *       list: List identifier
+     *        rev: Revision (optional)
      *
      * @return array Hash array with attachment properties:
      *         id: Attachment identifier
@@ -1227,7 +1482,13 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function get_attachment($id, $task)
     {
-        $task = $this->get_task($task);
+        // get old revision of the object
+        if ($task['rev']) {
+            $task = $this->get_task_revison($task, $task['rev']);
+        }
+        else {
+            $task = $this->get_task($task);
+        }
 
         if ($task && !empty($task['attachments'])) {
             foreach ($task['attachments'] as $att) {
@@ -1246,12 +1507,38 @@ class tasklist_kolab_driver extends tasklist_driver
      * @param array  $task  Hash array with event properties:
      *         id: Task identifier
      *       list: List identifier
+     *        rev: Revision (optional)
      *
      * @return string Attachment body
      */
     public function get_attachment_body($id, $task)
     {
         $this->_parse_id($task);
+
+        // get old revision of event
+        if ($task['rev']) {
+            if (empty($this->bonnie_api)) {
+                return false;
+            }
+
+            $cid = substr($id, 4);
+
+            // call Bonnie API and get the raw mime message
+            list($uid, $mailbox, $msguid) = $this->_resolve_task_identity($task);
+            if ($msg_raw = $this->bonnie_api->rawdata('task', $uid, $task['rev'], $mailbox, $msguid)) {
+                // parse the message and find the part with the matching content-id
+                $message = rcube_mime::parse_message($msg_raw);
+                foreach ((array)$message->parts as $part) {
+                    if ($part->headers['content-id'] && trim($part->headers['content-id'], '<>') == $cid) {
+                        return $part->body;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+
         if ($storage = $this->get_folder($task['list'])) {
             return $storage->get_attachment($task['uid'], $id);
         }
@@ -1299,6 +1586,8 @@ class tasklist_kolab_driver extends tasklist_driver
      */
     public function tasklist_edit_form($action, $list, $fieldprop)
     {
+        $this->_read_lists();
+
         if ($list['id'] && ($list = $this->lists[$list['id']])) {
             $folder_name = $this->get_folder($list['id'])->name; // UTF7
         }
@@ -1353,7 +1642,7 @@ class tasklist_kolab_driver extends tasklist_driver
         // add folder ACL tab
         if ($action != 'form-new') {
             $form['sharing'] = array(
-                'name'    => Q($this->plugin->gettext('tabsharing')),
+                'name'    => rcube::Q($this->plugin->gettext('tabsharing')),
                 'content' => html::tag('iframe', array(
                     'src' => $this->rc->url(array('_action' => 'folder-acl', '_folder' => $folder_name, 'framed' => 1)),
                     'width' => '100%',
@@ -1379,7 +1668,7 @@ class tasklist_kolab_driver extends tasklist_driver
                 foreach ($tab['fields'] as $col => $colprop) {
                     $label = !empty($colprop['label']) ? $colprop['label'] : $this->plugin->gettext($col);
 
-                    $table->add('title', html::label($colprop['id'], Q($label)));
+                    $table->add('title', html::label($colprop['id'], rcube::Q($label)));
                     $table->add(null, $colprop['value']);
                 }
                 $content = $table->show();
@@ -1389,7 +1678,7 @@ class tasklist_kolab_driver extends tasklist_driver
             }
 
             if (!empty($content)) {
-                $form_html .= html::tag('fieldset', null, html::tag('legend', null, Q($tab['name'])) . $content) . "\n";
+                $form_html .= html::tag('fieldset', null, html::tag('legend', null, rcube::Q($tab['name'])) . $content) . "\n";
             }
         }
 

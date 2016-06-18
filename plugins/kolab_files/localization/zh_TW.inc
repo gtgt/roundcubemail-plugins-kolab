@@ -6,10 +6,12 @@
  *
  * For translation see https://www.transifex.com/projects/p/kolab/resource/kolab_files/
  */
-$labels['save'] = 'Save';
-$labels['cancel'] = 'Cancel';
-$labels['folderinside'] = 'Insert inside';
-$labels['name'] = 'Name';
-$labels['edit'] = 'Edit';
-$labels['save'] = 'Save';
-?>
+$labels['listpermanent'] = 'List permanently';
+$labels['select'] = 'Select';
+$labels['participant'] = 'Participant';
+$labels['status'] = 'Status';
+$labels['addparticipant'] = 'Add participant';
+$labels['invitationtextlabel'] = 'Invitation/notification comment';
+$labels['statusorganizer'] = 'Organizer';
+$labels['owner'] = 'Owner';
+$labels['comment'] = 'Comment';

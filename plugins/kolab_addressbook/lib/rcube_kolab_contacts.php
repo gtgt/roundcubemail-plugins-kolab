@@ -29,8 +29,8 @@
 class rcube_kolab_contacts extends rcube_addressbook
 {
     public $primary_key = 'ID';
+    public $rights   = 'lrs';
     public $readonly = true;
-    public $editable = false;
     public $undelete = true;
     public $groups = true;
     public $coltypes = array(
@@ -100,6 +100,29 @@ class rcube_kolab_contacts extends rcube_addressbook
     private $imap_folder = 'INBOX/Contacts';
     private $action;
 
+    // list of fields used for searching in "All fields" mode
+    private $search_fields = array(
+      'name',
+      'firstname',
+      'surname',
+      'middlename',
+      'prefix',
+      'suffix',
+      'nickname',
+      'jobtitle',
+      'organization',
+      'department',
+      'email',
+      'phone',
+      'address',
+      'profession',
+      'manager',
+      'assistant',
+      'spouse',
+      'children',
+      'notes',
+    );
+
 
     public function __construct($imap_folder = null)
     {
@@ -112,36 +135,36 @@ class rcube_kolab_contacts extends rcube_addressbook
         $this->coltypes['phone']['subtypes'] = array_keys($format->phonetypes);
         $this->coltypes['address']['subtypes'] = array_keys($format->addresstypes);
 
+        $rcube = rcube::get_instance();
+
         // set localized labels for proprietary cols
         foreach ($this->coltypes as $col => $prop) {
             if (is_string($prop['label']))
-                $this->coltypes[$col]['label'] = rcube_label($prop['label']);
+                $this->coltypes[$col]['label'] = $rcube->gettext($prop['label']);
         }
 
         // fetch objects from the given IMAP folder
         $this->storagefolder = kolab_storage::get_folder($this->imap_folder);
         $this->ready = $this->storagefolder && !PEAR::isError($this->storagefolder);
 
-        // Set readonly and editable flags according to folder permissions
+        // Set readonly and rights flags according to folder permissions
         if ($this->ready) {
             if ($this->storagefolder->get_owner() == $_SESSION['username']) {
-                $this->editable = true;
                 $this->readonly = false;
+                $this->rights = 'lrswikxtea';
             }
             else {
                 $rights = $this->storagefolder->get_myrights();
-                if (!PEAR::isError($rights)) {
-                    if (strpos($rights, 'i') !== false)
+                if ($rights && !PEAR::isError($rights)) {
+                    $this->rights = $rights;
+                    if (strpos($rights, 'i') !== false && strpos($rights, 't') !== false)
                         $this->readonly = false;
-                    if (strpos($rights, 'a') !== false || strpos($rights, 'x') !== false)
-                        $this->editable = true;
                 }
             }
         }
 
         $this->action = rcube::get_instance()->action;
     }
-
 
     /**
      * Getter for the address book name to be displayed
@@ -150,8 +173,7 @@ class rcube_kolab_contacts extends rcube_addressbook
      */
     public function get_name()
     {
-        $folder = kolab_storage::object_name($this->imap_folder, $this->namespace);
-        return $folder;
+        return $this->storagefolder->get_name();
     }
 
     /**
@@ -162,7 +184,6 @@ class rcube_kolab_contacts extends rcube_addressbook
         return $this->storagefolder->get_foldername();
     }
 
-
     /**
      * Getter for the IMAP folder name
      *
@@ -172,7 +193,6 @@ class rcube_kolab_contacts extends rcube_addressbook
     {
         return $this->imap_folder;
     }
-
 
     /**
      * Getter for the name of the namespace to which the IMAP folder belongs
@@ -416,7 +436,7 @@ class rcube_kolab_contacts extends rcube_addressbook
             return $result;
         }
         else if ($fields == '*') {
-          $fields = array_keys($this->coltypes);
+          $fields = $this->search_fields;
         }
 
         if (!is_array($fields))
@@ -467,26 +487,26 @@ class rcube_kolab_contacts extends rcube_addressbook
             }
 
             $found = array();
+            $contents = '';
             foreach (preg_grep($regexp, array_keys($contact)) as $col) {
                 $pos     = strpos($col, ':');
                 $colname = $pos ? substr($col, 0, $pos) : $col;
-                $search  = $advanced ? $value[array_search($colname, $fields)] : $value;
 
                 foreach ((array)$contact[$col] as $val) {
-                    if ($this->compare_search_value($colname, $val, $search, $mode)) {
-                        if (!$advanced) {
-                            $this->filter['ids'][] = $id;
-                            break 2;
-                        }
-                        else {
-                            $found[$colname] = true;
-                        }
+                    if ($advanced) {
+                        $found[$colname] = $this->compare_search_value($colname, $val, $value[array_search($colname, $fields)], $mode);
+                    }
+                    else {
+                        $contents .= ' ' . join(' ', (array)$val);
                     }
                 }
             }
 
-            if (count($found) >= $scount) // && $advanced
+            // compare matches
+            if (($advanced && count($found) >= $scount) ||
+                (!$advanced && rcube_utils::words_match(mb_strtolower($contents), $value))) {
                 $this->filter['ids'][] = $id;
+            }
         }
 
         // dummy result with contacts count
@@ -555,9 +575,20 @@ class rcube_kolab_contacts extends rcube_addressbook
     {
         $rec = null;
         $uid = $this->id2uid($id);
+        $rev = rcube_utils::get_input_value('_rev', rcube_utils::INPUT_GPC);
+
         if (strpos($uid, 'mailto:') === 0) {
             $this->_fetch_groups(true);
             $rec = $this->contacts[$id];
+            $this->readonly = true;  // set source to read-only
+        }
+        else if (!empty($rev)) {
+            $rcmail = rcube::get_instance();
+            $plugin = $rcmail->plugins->get_plugin('kolab_addressbook');
+            if ($plugin && ($object = $plugin->get_revision($id, kolab_storage::id_encode($this->imap_folder), $rev))) {
+                $rec = $this->_to_rcube_contact($object);
+                $rec['rev'] = $rev;
+            }
             $this->readonly = true;  // set source to read-only
         }
         else if ($object = $this->storagefolder->get_object($uid)) {
@@ -1002,9 +1033,11 @@ class rcube_kolab_contacts extends rcube_addressbook
         // validate e-mail addresses
         $valid = parent::validate($save_data);
 
-        // require at least one e-mail address (syntax check is already done)
+        // require at least one e-mail address if there's no name
+        // (syntax check is already done)
         if ($valid) {
             if (!strlen($save_data['name'])
+                && !strlen($save_data['organization'])
                 && !array_filter($this->get_col_values('email', $save_data, true))
             ) {
                 $this->set_error('warning', 'kolab_addressbook.noemailnamewarning');
@@ -1090,7 +1123,7 @@ class rcube_kolab_contacts extends rcube_addressbook
     {
         if (!isset($this->distlists)) {
             $this->distlists = $this->groupmembers = array();
-            foreach ($this->storagefolder->get_objects('distribution-list') as $record) {
+            foreach ($this->storagefolder->select('distribution-list') as $record) {
                 $record['ID'] = $this->uid2id($record['uid']);
                 foreach ((array)$record['member'] as $i => $member) {
                     $mid = $this->uid2id($member['uid'] ? $member['uid'] : 'mailto:' . $member['email']);

@@ -37,7 +37,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
     public $valid = false;
 
     protected $error = 0;
-
     protected $resource_uri;
 
 
@@ -50,10 +49,8 @@ class kolab_storage_folder extends kolab_storage_folder_api
     function __construct($name, $type = null, $type_annotation = null)
     {
         parent::__construct($name);
-        $this->imap->set_options(array('skip_deleted' => true));
         $this->set_folder($name, $type, $type_annotation);
     }
-
 
     /**
      * Set the IMAP folder this instance connects to
@@ -64,15 +61,16 @@ class kolab_storage_folder extends kolab_storage_folder_api
      */
     public function set_folder($name, $type = null, $type_annotation = null)
     {
+        $this->name = $name;
+
         if (empty($type_annotation)) {
-            $type_annotation = kolab_storage::folder_type($name);
+            $type_annotation = $this->get_type();
         }
 
         $oldtype = $this->type;
         list($this->type, $suffix) = explode('.', $type_annotation);
         $this->default      = $suffix == 'default';
         $this->subtype      = $this->default ? '' : $suffix;
-        $this->name         = $name;
         $this->id           = kolab_storage::folder_id($name);
         $this->valid        = !empty($this->type) && $this->type != 'mail' && (!$type || $this->type == $type);
 
@@ -122,12 +120,14 @@ class kolab_storage_folder extends kolab_storage_folder_api
      */
     public function get_resource_uri()
     {
-        if (!empty($this->resource_uri))
+        if (!empty($this->resource_uri)) {
             return $this->resource_uri;
+        }
 
         // strip namespace prefix from folder name
-        $ns = $this->get_namespace();
+        $ns     = $this->get_namespace();
         $nsdata = $this->imap->get_namespace($ns);
+
         if (is_array($nsdata[0]) && strlen($nsdata[0][0]) && strpos($this->name, $nsdata[0][0]) === 0) {
             $subpath = substr($this->name, strlen($nsdata[0][0]));
             if ($ns == 'other') {
@@ -152,19 +152,24 @@ class kolab_storage_folder extends kolab_storage_folder_api
     public function get_uid()
     {
         // UID is defined in folder METADATA
-        $metakeys = array(kolab_storage::UID_KEY_SHARED, kolab_storage::UID_KEY_PRIVATE, kolab_storage::UID_KEY_CYRUS);
-        $metadata = $this->get_metadata($metakeys);
-        foreach ($metakeys as $key) {
-            if (($uid = $metadata[$key])) {
+        $metakeys = array(kolab_storage::UID_KEY_SHARED, kolab_storage::UID_KEY_CYRUS);
+        $metadata = $this->get_metadata();
+
+        if ($metadata !== null) {
+            foreach ($metakeys as $key) {
+                if ($uid = $metadata[$key]) {
+                    return $uid;
+                }
+            }
+
+            // generate a folder UID and set it to IMAP
+            $uid = rtrim(chunk_split(md5($this->name . $this->get_owner() . uniqid('-', true)), 12, '-'), '-');
+            if ($this->set_uid($uid)) {
                 return $uid;
             }
         }
 
-        // generate a folder UID and set it to IMAP
-        $uid = rtrim(chunk_split(md5($this->name . $this->get_owner() . uniqid('-', true)), 12, '-'), '-');
-        if ($this->set_uid($uid)) {
-            return $uid;
-        }
+        $this->check_error();
 
         // create hash from folder name if we can't write the UID metadata
         return md5($this->name . $this->get_owner());
@@ -178,9 +183,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
      */
     public function set_uid($uid)
     {
-        if (!($success = $this->set_metadata(array(kolab_storage::UID_KEY_SHARED => $uid)))) {
-            $success = $this->set_metadata(array(kolab_storage::UID_KEY_PRIVATE => $uid));
-        }
+        $success = $this->set_metadata(array(kolab_storage::UID_KEY_SHARED => $uid));
 
         $this->check_error();
         return $success;
@@ -243,8 +246,9 @@ class kolab_storage_folder extends kolab_storage_folder_api
     /**
      * Get number of objects stored in this folder
      *
-     * @param mixed  Pseudo-SQL query as list of filter parameter triplets
+     * @param mixed Pseudo-SQL query as list of filter parameter triplets
      *    or string with object type (e.g. contact, event, todo, journal, note, configuration)
+     *
      * @return integer The number of objects of the given type
      * @see self::select()
      */
@@ -260,34 +264,26 @@ class kolab_storage_folder extends kolab_storage_folder_api
         return $this->cache->count($this->_prepare_query($query));
     }
 
-
     /**
-     * List all Kolab objects of the given type
+     * List Kolab objects matching the given query
      *
-     * @param string  $type Object type (e.g. contact, event, todo, journal, note, configuration)
-     * @return array  List of Kolab data objects (each represented as hash array)
+     * @param mixed Pseudo-SQL query as list of filter parameter triplets
+     *    or string with object type (e.g. contact, event, todo, journal, note, configuration)
+     *
+     * @return array List of Kolab data objects (each represented as hash array)
+     * @deprecated Use select()
      */
-    public function get_objects($type = null)
+    public function get_objects($query = array())
     {
-        if (!$type) $type = $this->type;
-
-        if (!$this->valid) {
-            return array();
-        }
-
-        // synchronize caches
-        $this->cache->synchronize();
-
-        // fetch objects from cache
-        return $this->cache->select($this->_prepare_query($type));
+        return $this->select($query);
     }
 
-
     /**
-     * Select *some* Kolab objects matching the given query
+     * Select Kolab objects matching the given query
      *
-     * @param array Pseudo-SQL query as list of filter parameter triplets
-     *   triplet: array('<colname>', '<comparator>', '<value>')
+     * @param mixed Pseudo-SQL query as list of filter parameter triplets
+     *    or string with object type (e.g. contact, event, todo, journal, note, configuration)
+     *
      * @return array List of Kolab data objects (each represented as hash array)
      */
     public function select($query = array())
@@ -296,18 +292,12 @@ class kolab_storage_folder extends kolab_storage_folder_api
             return array();
         }
 
-        // check query argument
-        if (empty($query)) {
-            return $this->get_objects();
-        }
-
         // synchronize caches
         $this->cache->synchronize();
 
         // fetch objects from cache
         return $this->cache->select($this->_prepare_query($query));
     }
-
 
     /**
      * Getter for object UIDs only
@@ -370,34 +360,24 @@ class kolab_storage_folder extends kolab_storage_folder_api
         return $query;
     }
 
-
     /**
-     * Getter for a single Kolab object, identified by its UID
+     * Getter for a single Kolab object identified by its UID
      *
-     * @param string $uid  Object UID
-     * @param string $type Object type (e.g. contact, event, todo, journal, note, configuration)
-     *                     Defaults to folder type
+     * @param string $uid Object UID
      *
      * @return array The Kolab object represented as hash array
      */
-    public function get_object($uid, $type = null)
+    public function get_object($uid)
     {
-        if (!$this->valid) {
+        if (!$this->valid || !$uid) {
             return false;
         }
 
         // synchronize caches
         $this->cache->synchronize();
 
-        $msguid = $this->cache->uid2msguid($uid);
-
-        if ($msguid && ($object = $this->cache->get($msguid, $type))) {
-            return $object;
-        }
-
-        return false;
+        return $this->cache->get_by_uid($uid);
     }
-
 
     /**
      * Fetch a Kolab object attachment which is stored in a separate part
@@ -446,7 +426,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
         return null;
     }
 
-
     /**
      * Fetch the mime message from the storage server and extract
      * the Kolab groupware object from it
@@ -468,9 +447,9 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         $this->imap->set_folder($folder);
 
-        $this->cache->bypass(true);
+        $this->cache->imap_mode(true);
         $message = new rcube_message($msguid);
-        $this->cache->bypass(false);
+        $this->cache->imap_mode(false);
 
         // Message doesn't exist?
         if (empty($message->headers)) {
@@ -514,7 +493,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         // get XML part
         foreach ((array)$message->attachments as $part) {
-            if (!$xml && ($part->mimetype == $content_type || preg_match('!application/([a-z.]+\+)?xml!', $part->mimetype))) {
+            if (!$xml && ($part->mimetype == $content_type || preg_match('!application/([a-z.]+\+)?xml!i', $part->mimetype))) {
                 $xml = $message->get_part_body($part->mime_id, true);
             }
             else if ($part->filename || $part->content_id) {
@@ -601,10 +580,11 @@ class kolab_storage_folder extends kolab_storage_folder_api
     /**
      * Save an object in this folder.
      *
-     * @param array  $object    The array that holds the data of the object.
-     * @param string $type      The type of the kolab object.
-     * @param string $uid       The UID of the old object if it existed before
-     * @return boolean          True on success, false on error
+     * @param array  $object The array that holds the data of the object.
+     * @param string $type   The type of the kolab object.
+     * @param string $uid    The UID of the old object if it existed before
+     *
+     * @return mixed False on error or IMAP message UID on success
      */
     public function save(&$object, $type = null, $uid = null)
     {
@@ -616,7 +596,8 @@ class kolab_storage_folder extends kolab_storage_folder_api
             $type = $this->type;
 
         // copy attachments from old message
-        if (!empty($object['_msguid']) && ($old = $this->cache->get($object['_msguid'], $type, $object['_mailbox']))) {
+        $copyfrom = $object['_copyfrom'] ?: $object['_msguid'];
+        if (!empty($copyfrom) && ($old = $this->cache->get($copyfrom, $type, $object['_mailbox']))) {
             foreach ((array)$old['_attachments'] as $key => $att) {
                 if (!isset($object['_attachments'][$key])) {
                     $object['_attachments'][$key] = $old['_attachments'][$key];
@@ -628,7 +609,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
                 // load photo.attachment from old Kolab2 format to be directly embedded in xcard block
                 else if ($type == 'contact' && ($key == 'photo.attachment' || $key == 'kolab-picture.png') && $att['id']) {
                     if (!isset($object['photo']))
-                        $object['photo'] = $this->get_attachment($object['_msguid'], $att['id'], $object['_mailbox']);
+                        $object['photo'] = $this->get_attachment($copyfrom, $att['id'], $object['_mailbox']);
                     unset($object['_attachments'][$key]);
                 }
             }
@@ -679,7 +660,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
                     $ext = preg_match('/(\.[a-z0-9]{1,6})$/i', $attachment['name'], $m) ? $m[1] : null;
                     $basename = preg_replace('/[^a-z0-9_.-]/i', '', basename($attachment['name'], $ext));  // to 7bit ascii
                     if (!$basename) $basename = 'noname';
-                    $cid = $basename . '.' . microtime(true) . $ext;
+                    $cid = $basename . '.' . microtime(true) . $key . $ext;
 
                     $object['_attachments'][$cid] = $attachment;
                     unset($object['_attachments'][$key]);
@@ -716,9 +697,9 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
                 if ($old_uid) {
                     // delete old message
-                    $this->cache->bypass(true);
+                    $this->cache->imap_mode(true);
                     $this->imap->delete_message($old_uid, $object['_mailbox']);
-                    $this->cache->bypass(false);
+                    $this->cache->imap_mode(false);
                 }
 
                 // insert/update message in cache
@@ -814,7 +795,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
         $msguid = is_array($object) ? $object['_msguid'] : $this->cache->uid2msguid($object);
         $success = false;
 
-        $this->cache->bypass(true);
+        $this->cache->imap_mode(true);
 
         if ($msguid && $expunge) {
             $success = $this->imap->delete_message($msguid, $this->name);
@@ -823,7 +804,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
             $success = $this->imap->set_flag($msguid, 'DELETED', $this->name);
         }
 
-        $this->cache->bypass(false);
+        $this->cache->imap_mode(false);
 
         if ($success) {
             $this->cache->set($msguid, false);
@@ -831,7 +812,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         return $success;
     }
-
 
     /**
      *
@@ -843,13 +823,12 @@ class kolab_storage_folder extends kolab_storage_folder_api
         }
 
         $this->cache->purge();
-        $this->cache->bypass(true);
+        $this->cache->imap_mode(true);
         $result = $this->imap->clear_folder($this->name);
-        $this->cache->bypass(false);
+        $this->cache->imap_mode(false);
 
         return $result;
     }
-
 
     /**
      * Restore a previously deleted object
@@ -864,9 +843,9 @@ class kolab_storage_folder extends kolab_storage_folder_api
         }
 
         if ($msguid = $this->cache->uid2msguid($uid, true)) {
-            $this->cache->bypass(true);
+            $this->cache->imap_mode(true);
             $result = $this->imap->set_flag($msguid, 'UNDELETED', $this->name);
-            $this->cache->bypass(false);
+            $this->cache->imap_mode(false);
 
             if ($result) {
                 return $msguid;
@@ -875,7 +854,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         return false;
     }
-
 
     /**
      * Move a Kolab object message to another IMAP folder
@@ -894,12 +872,13 @@ class kolab_storage_folder extends kolab_storage_folder_api
             $target_folder = kolab_storage::get_folder($target_folder);
 
         if ($msguid = $this->cache->uid2msguid($uid)) {
-            $this->cache->bypass(true);
+            $this->cache->imap_mode(true);
             $result = $this->imap->move_message($msguid, $target_folder->name, $this->name);
-            $this->cache->bypass(false);
+            $this->cache->imap_mode(false);
 
             if ($result) {
-                $this->cache->move($msguid, $uid, $target_folder);
+                $new_uid = ($copyuid = $this->imap->conn->data['COPYUID']) ? $copyuid[1] : null;
+                $this->cache->move($msguid, $uid, $target_folder, $new_uid);
                 return true;
             }
             else {
@@ -913,7 +892,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         return false;
     }
-
 
     /**
      * Creates source of the configuration object message
@@ -1010,7 +988,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
         foreach ((array)$object['_attachments'] as $key => $att) {
             if (empty($att['content']) && !empty($att['id'])) {
                 // @TODO: use IMAP CATENATE to skip attachment fetch+push operation
-                $msguid = !empty($object['_msguid']) ? $object['_msguid'] : $object['uid'];
+                $msguid = $object['_copyfrom'] ?: ($object['_msguid'] ?: $object['uid']);
                 if ($is_file) {
                     $att['path'] = tempnam($temp_dir, 'rcmAttmnt');
                     if (($fp = fopen($att['path'], 'w')) && $this->get_attachment($msguid, $att['id'], $object['_mailbox'], false, $fp, true)) {
@@ -1082,7 +1060,7 @@ class kolab_storage_folder extends kolab_storage_folder_api
             $body_file = tempnam($temp_dir, 'rcmMsg');
 
             if (PEAR::isError($mime_result = $mime->saveMessageBody($body_file))) {
-                self::raise_error(array('code' => 650, 'type' => 'php',
+                rcube::raise_error(array('code' => 650, 'type' => 'php',
                     'file' => __FILE__, 'line' => __LINE__,
                     'message' => "Could not create message: ".$mime_result->getMessage()),
                     true, false);
@@ -1094,7 +1072,6 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         return $message;
     }
-
 
     /**
      * Triggers any required updates after changes within the
@@ -1161,6 +1138,4 @@ class kolab_storage_folder extends kolab_storage_folder_api
 
         return true;
     }
-
 }
-

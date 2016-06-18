@@ -6,10 +6,9 @@
  *
  * For translation see https://www.transifex.com/projects/p/kolab/resource/kolab_tags/
  */
-$labels['tags'] = 'Etiketter';
-$labels['add'] = 'Lägg till';
+$labels['tags'] = 'Taggar';
+$labels['untag'] = 'Ta bort tagg';
 $labels['edit'] = 'Redigera';
-$labels['delete'] = 'Ta bort';
 $labels['tagname'] = 'Namn';
 $labels['tagcolor'] = 'Färg';
 $labels['saving'] = 'Sparar data ...';

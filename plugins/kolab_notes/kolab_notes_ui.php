@@ -51,6 +51,7 @@ class kolab_notes_ui
         $this->plugin->register_handler('plugin.notetitle', array($this, 'notetitle'));
         $this->plugin->register_handler('plugin.detailview', array($this, 'detailview'));
         $this->plugin->register_handler('plugin.attachments_list', array($this, 'attachments_list'));
+        $this->plugin->register_handler('plugin.object_changelog_table', array('libkolab', 'object_changelog_table'));
 
         $this->rc->output->include_script('list.js');
         $this->rc->output->include_script('treelist.js');
@@ -61,6 +62,7 @@ class kolab_notes_ui
         // include kolab folderlist widget if available
         if (in_array('libkolab', $this->plugin->api->loaded_plugins())) {
             $this->plugin->api->include_script('libkolab/js/folderlist.js');
+            $this->plugin->api->include_script('libkolab/js/audittrail.js');
         }
 
         // load config options and user prefs relevant for the UI
@@ -101,7 +103,7 @@ class kolab_notes_ui
 
         $this->rc->output->set_env('kolab_notes_settings', $settings);
 
-        $this->rc->output->add_label('save','cancel','delete');
+        $this->rc->output->add_label('save','cancel','delete','close');
     }
 
     public function folders($attrib)
@@ -131,7 +133,7 @@ class kolab_notes_ui
                 }
 
                 if ($attrib['type'] == 'select') {
-                    if ($prop['editable']) {
+                    if ($prop['editable'] || strpos($prop['rights'], 'i') !== false) {
                         $select->add($prop['name'], $prop['id']);
                     }
                 }
@@ -204,7 +206,7 @@ class kolab_notes_ui
         }
 
         $title = $prop['title'] ?: ($prop['name'] != $prop['listname'] || strlen($prop['name']) > 25 ?
-          html_entity_decode($prop['name'], ENT_COMPAT, RCMAIL_CHARSET) : '');
+          html_entity_decode($prop['name'], ENT_COMPAT, RCUBE_CHARSET) : '');
 
         $label_id = 'nl:' . $id;
         $attr = $prop['virtual'] ? array('tabindex' => '0') : array('href' => $this->rc->url(array('_list' => $id)));
@@ -350,7 +352,7 @@ class kolab_notes_ui
         // add folder ACL tab
         if ($action != 'form-new') {
             $form['sharing'] = array(
-                'name'    => Q($this->plugin->gettext('tabsharing')),
+                'name'    => rcube::Q($this->plugin->gettext('tabsharing')),
                 'content' => html::tag('iframe', array(
                     'src' => $this->rc->url(array('_action' => 'folder-acl', '_folder' => $folder_name, 'framed' => 1)),
                     'width' => '100%',
@@ -376,7 +378,7 @@ class kolab_notes_ui
                 foreach ($tab['fields'] as $col => $colprop) {
                     $label = !empty($colprop['label']) ? $colprop['label'] : $this->plugin->gettext($col);
 
-                    $table->add('title', html::label($colprop['id'], Q($label)));
+                    $table->add('title', html::label($colprop['id'], rcube::Q($label)));
                     $table->add(null, $colprop['value']);
                 }
                 $content = $table->show();
@@ -386,7 +388,7 @@ class kolab_notes_ui
             }
 
             if (!empty($content)) {
-                $form_html .= html::tag('fieldset', null, html::tag('legend', null, Q($tab['name'])) . $content) . "\n";
+                $form_html .= html::tag('fieldset', null, html::tag('legend', null, rcube::Q($tab['name'])) . $content) . "\n";
             }
         }
 

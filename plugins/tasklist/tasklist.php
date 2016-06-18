@@ -55,15 +55,17 @@ class tasklist extends rcube_plugin
 
     public $rc;
     public $lib;
-    public $driver;
     public $timezone;
     public $ui;
     public $home;  // declare public to be used in other classes
 
+    // These are handled by __get()
+    // public $driver;
+    // public $itip;
+    // public $ical;
+
     private $collapsed_tasks = array();
-    private $message_tasks = array();
-    private $itip;
-    private $ical;
+    private $message_tasks   = array();
 
 
     /**
@@ -208,7 +210,7 @@ class tasklist extends rcube_plugin
         $action = rcube_utils::get_input_value('action', rcube_utils::INPUT_GPC);
         $rec    = rcube_utils::get_input_value('t', rcube_utils::INPUT_POST, true);
         $oldrec = $rec;
-        $success = $refresh = false;
+        $success = $refresh = $got_msg = false;
 
         // force notify if hidden + active
         $itip_send_option = (int)$this->rc->config->get('calendar_itip_send_option', 3);
@@ -252,12 +254,16 @@ class tasklist extends rcube_plugin
             $rec = $this->prepare_task($rec);
             $clone = $this->handle_recurrence($rec, $this->driver->get_task($rec));
             if ($success = $this->driver->edit_task($rec)) {
-                $refresh[] = $this->driver->get_task($rec);
+                $new_task = $this->driver->get_task($rec);
+                $new_task['tempid'] = $rec['id'];
+                $refresh[] = $new_task;
                 $this->cleanup_task($rec);
 
                 // add clone from recurring task
                 if ($clone && $this->driver->create_task($clone)) {
-                    $refresh[] = $this->driver->get_task($clone);
+                    $new_clone = $this->driver->get_task($clone);
+                    $new_clone['tempid'] = $clone['id'];
+                    $refresh[] = $new_clone;
                     $this->driver->clear_alarms($rec['id']);
                 }
 
@@ -268,6 +274,7 @@ class tasklist extends rcube_plugin
                         if ($this->driver->move_task($child)) {
                             $r = $this->driver->get_task($child);
                             if ((bool)($filter & self::FILTER_MASK_COMPLETE) == $this->driver->is_complete($r)) {
+                                $r['tempid'] = $cid;
                                 $refresh[] = $r;
                             }
                         }
@@ -385,13 +392,126 @@ class tasklist extends rcube_plugin
                 }
             }
             break;
+
+        case 'changelog':
+            $data = $this->driver->get_task_changelog($rec);
+            if (is_array($data) && !empty($data)) {
+                $lib = $this->lib;
+                $dtformat = $this->rc->config->get('date_format') . ' ' . $this->rc->config->get('time_format');
+                array_walk($data, function(&$change) use ($lib, $dtformat) {
+                  if ($change['date']) {
+                      $dt = $lib->adjust_timezone($change['date']);
+                      if ($dt instanceof DateTime) {
+                          $change['date'] = $this->rc->format_date($dt, $dtformat, false);
+                      }
+                  }
+                });
+                $this->rc->output->command('plugin.task_render_changelog', $data);
+            }
+            else {
+                $this->rc->output->command('plugin.task_render_changelog', false);
+            }
+            $got_msg = true;
+            break;
+
+        case 'diff':
+            $data = $this->driver->get_task_diff($rec, $rec['rev1'], $rec['rev2']);
+            if (is_array($data)) {
+                // convert some properties, similar to self::_client_event()
+                $lib = $this->lib;
+                $date_format = $this->rc->config->get('date_format', 'Y-m-d');
+                $time_format = $this->rc->config->get('time_format', 'H:i');
+                array_walk($data['changes'], function(&$change, $i) use ($lib, $date_format, $time_format) {
+                    // convert date cols
+                    if (in_array($change['property'], array('date','start','created','changed'))) {
+                        if (!empty($change['old'])) {
+                            $dtformat = strlen($change['old']) == 10 ? $date_format : $date_format . ' ' . $time_format;
+                            $change['old_'] = $lib->adjust_timezone($change['old'], strlen($change['old']) == 10)->format($dtformat);
+                        }
+                        if (!empty($change['new'])) {
+                            $dtformat = strlen($change['new']) == 10 ? $date_format : $date_format . ' ' . $time_format;
+                            $change['new_'] = $lib->adjust_timezone($change['new'], strlen($change['new']) == 10)->format($dtformat);
+                        }
+                    }
+                    // create textual representation for alarms and recurrence
+                    if ($change['property'] == 'alarms') {
+                        if (is_array($change['old']))
+                            $change['old_'] = libcalendaring::alarm_text($change['old']);
+                        if (is_array($change['new']))
+                            $change['new_'] = libcalendaring::alarm_text(array_merge((array)$change['old'], $change['new']));
+                    }
+                    if ($change['property'] == 'recurrence') {
+                        if (is_array($change['old']))
+                            $change['old_'] = $lib->recurrence_text($change['old']);
+                        if (is_array($change['new']))
+                            $change['new_'] = $lib->recurrence_text(array_merge((array)$change['old'], $change['new']));
+                    }
+                    if ($change['property'] == 'complete') {
+                        $change['old_'] = intval($change['old']) . '%';
+                        $change['new_'] = intval($change['new']) . '%';
+                    }
+                    if ($change['property'] == 'attachments') {
+                        if (is_array($change['old']))
+                            $change['old']['classname'] = rcube_utils::file2class($change['old']['mimetype'], $change['old']['name']);
+                        if (is_array($change['new'])) {
+                            $change['new'] = array_merge((array)$change['old'], $change['new']);
+                            $change['new']['classname'] = rcube_utils::file2class($change['new']['mimetype'], $change['new']['name']);
+                        }
+                    }
+                    // resolve parent_id to the refered task title for display
+                    if ($change['property'] == 'parent_id') {
+                        $change['property'] = 'parent-title';
+                        if (!empty($change['old']) && ($old_parent = $this->driver->get_task(array('id' => $change['old'], 'list' => $rec['list'])))) {
+                            $change['old_'] = $old_parent['title'];
+                        }
+                        if (!empty($change['new']) && ($new_parent = $this->driver->get_task(array('id' => $change['new'], 'list' => $rec['list'])))) {
+                            $change['new_'] = $new_parent['title'];
+                        }
+                    }
+                    // compute a nice diff of description texts
+                    if ($change['property'] == 'description') {
+                        $change['diff_'] = libkolab::html_diff($change['old'], $change['new']);
+                    }
+                });
+                $this->rc->output->command('plugin.task_show_diff', $data);
+            }
+            else {
+                $this->rc->output->command('display_message', $this->gettext('objectdiffnotavailable'), 'error');
+            }
+            $got_msg = true;
+            break;
+
+        case 'show':
+            if ($rec = $this->driver->get_task_revison($rec, $rec['rev'])) {
+                $this->encode_task($rec);
+                $rec['readonly'] = 1;
+                $this->rc->output->command('plugin.task_show_revision', $rec);
+            }
+            else {
+                $this->rc->output->command('display_message', $this->gettext('objectnotfound'), 'error');
+            }
+            $got_msg = true;
+            break;
+
+        case 'restore':
+            if ($success = $this->driver->restore_task_revision($rec, $rec['rev'])) {
+                $refresh = $this->driver->get_task($rec);
+                $this->rc->output->command('display_message', $this->gettext(array('name' => 'objectrestoresuccess', 'vars' => array('rev' => $rec['rev']))), 'confirmation');
+                $this->rc->output->command('plugin.close_history_dialog');
+            }
+            else {
+                $this->rc->output->command('display_message', $this->gettext('objectrestoreerror'), 'error');
+            }
+            $got_msg = true;
+            break;
+
         }
 
         if ($success) {
             $this->rc->output->show_message('successfullysaved', 'confirmation');
             $this->update_counts($oldrec, $refresh);
         }
-        else {
+        else if (!$got_msg) {
             $this->rc->output->show_message('tasklist.errorsaving', 'error');
         }
 
@@ -409,9 +529,12 @@ class tasklist extends rcube_plugin
                     $this->rc->output->show_message('tasklist.errornotifying', 'error');
             }
         }
-        else if ($success && $rec['_reportpartstat'] && $rec['_reportpartstat'] != 'NEEDS-ACTION') {
+
+        if ($success && $rec['_reportpartstat'] && $rec['_reportpartstat'] != 'NEEDS-ACTION') {
             // get the full record after update
-            $task = $this->driver->get_task($rec);
+            if (!$task) {
+                $task = $this->driver->get_task($rec);
+            }
 
             // send iTip REPLY with the updated partstat
             if ($task['organizer'] && ($idx = $this->is_attendee($task)) !== false) {
@@ -443,6 +566,9 @@ class tasklist extends rcube_plugin
                     $this->encode_task($refresh[$i]);
             }
             $this->rc->output->command('plugin.update_task', $refresh);
+        }
+        else if ($success && ($action == 'delete' || $action == 'undelete')) {
+            $this->rc->output->command('plugin.refresh_tagcloud');
         }
     }
 
@@ -614,6 +740,12 @@ class tasklist extends rcube_plugin
         // convert invalid data
         if (isset($rec['attendees']) && !is_array($rec['attendees']))
             $rec['attendees'] = array();
+
+        foreach ((array)$rec['attendees'] as $i => $attendee) {
+            if (is_string($attendee['rsvp'])) {
+                $rec['attendees'][$i]['rsvp'] = $attendee['rsvp'] == 'true' || $attendee['rsvp'] == '1';
+            }
+        }
 
         // copy the task status to my attendee partstat
         if (!empty($rec['_reportpartstat'])) {
@@ -1137,11 +1269,17 @@ class tasklist extends rcube_plugin
 
         // convert link URIs references into structs
         if (array_key_exists('links', $rec)) {
-            foreach ((array)$rec['links'] as $i => $link) {
-                if (strpos($link, 'imap://') === 0 && ($msgref = $this->driver->get_message_reference($link))) {
+            foreach ((array) $rec['links'] as $i => $link) {
+                if (strpos($link, 'imap://') === 0 && ($msgref = $this->driver->get_message_reference($link, 'task'))) {
                     $rec['links'][$i] = $msgref;
                 }
             }
+        }
+
+        // Convert HTML description into plain text
+        if ($this->is_html($rec)) {
+            $h2t = new rcube_html2text($rec['description'], false, true, 0);
+            $rec['description'] = $h2t->get_text();
         }
 
         if (!is_array($rec['tags']))
@@ -1158,17 +1296,31 @@ class tasklist extends rcube_plugin
     }
 
     /**
+     * Determine whether the given task description is HTML formatted
+     */
+    private function is_html($task)
+    {
+        // check for opening and closing <html> or <body> tags
+        return (preg_match('/<(html|body)(\s+[a-z]|>)/', $task['description'], $m) && strpos($task['description'], '</'.$m[1].'>') > 0);
+    }
+
+    /**
      * Callback function for array_walk over all tasks.
      * Sets tree depth and parent titles
      */
     private function task_walk_tree(&$rec)
     {
         $rec['_depth'] = 0;
+        $parent_titles = array();
         $parent_id = $this->task_tree[$rec['id']];
         while ($parent_id) {
             $rec['_depth']++;
-            $rec['parent_title'] = $this->task_titles[$parent_id];
+            array_unshift($parent_titles, $this->task_titles[$parent_id]);
             $parent_id = $this->task_tree[$parent_id];
+        }
+
+        if (count($parent_titles)) {
+            $rec['parent_title'] = join(' » ', array_filter($parent_titles));
         }
     }
 
@@ -1180,19 +1332,27 @@ class tasklist extends rcube_plugin
      */
     public function filter_mask($rec)
     {
-        static $today, $tomorrow, $weeklimit;
+        static $today, $today_date, $tomorrow, $weeklimit;
 
         if (!$today) {
-            $today_date = new DateTime('now', $this->timezone);
-            $today = $today_date->format('Y-m-d');
+            $today_date    = new DateTime('now', $this->timezone);
+            $today         = $today_date->format('Y-m-d');
             $tomorrow_date = new DateTime('now + 1 day', $this->timezone);
-            $tomorrow = $tomorrow_date->format('Y-m-d');
-            $week_date = new DateTime('now + 7 days', $this->timezone);
-            $weeklimit = $week_date->format('Y-m-d');
+            $tomorrow      = $tomorrow_date->format('Y-m-d');
+
+            // In Kolab-mode we hide "Next 7 days" filter, which means
+            // "Later" should catch tasks with date after tomorrow (#5353)
+            if ($this->rc->output->get_env('tasklist_driver') == 'kolab') {
+                $weeklimit = $tomorrow;
+            }
+            else {
+                $week_date = new DateTime('now + 7 days', $this->timezone);
+                $weeklimit = $week_date->format('Y-m-d');
+            }
         }
 
-        $mask = 0;
-        $start = $rec['startdate'] ?: '1900-00-00';
+        $mask    = 0;
+        $start   = $rec['startdate'] ?: '1900-00-00';
         $duedate = $rec['date'] ?: '3000-00-00';
 
         if ($rec['flagged'])
@@ -1205,14 +1365,63 @@ class tasklist extends rcube_plugin
         else if ($rec['date'] < $today)
             $mask |= self::FILTER_MASK_OVERDUE;
 
-        if ($duedate <= $today || ($rec['startdate'] && $start <= $today))
-            $mask |= self::FILTER_MASK_TODAY;
-        if ($duedate <= $tomorrow || ($rec['startdate'] && $start <= $tomorrow))
-            $mask |= self::FILTER_MASK_TOMORROW;
-        if (($start > $tomorrow && $start <= $weeklimit) || ($duedate > $tomorrow && $duedate <= $weeklimit))
-            $mask |= self::FILTER_MASK_WEEK;
-        else if ($start > $weeklimit || ($rec['date'] && $duedate > $weeklimit))
-            $mask |= self::FILTER_MASK_LATER;
+        if (empty($rec['recurrence']) || $duedate < $today || $start > $weeklimit) {
+            if ($duedate <= $today || ($rec['startdate'] && $start <= $today))
+                $mask |= self::FILTER_MASK_TODAY;
+            if ($duedate <= $tomorrow || ($rec['startdate'] && $start <= $tomorrow))
+                $mask |= self::FILTER_MASK_TOMORROW;
+            if (($start > $tomorrow && $start <= $weeklimit) || ($duedate > $tomorrow && $duedate <= $weeklimit))
+                $mask |= self::FILTER_MASK_WEEK;
+            else if ($start > $weeklimit || $duedate > $weeklimit)
+                $mask |= self::FILTER_MASK_LATER;
+        }
+        else if ($rec['startdate'] || $rec['date']) {
+            $date = new DateTime($rec['startdate'] ?: $rec['date'], $this->timezone);
+
+            // set safe recurrence start
+            while ($date->format('Y-m-d') >= $today) {
+                switch ($rec['recurrence']['FREQ']) {
+                    case 'DAILY':
+                        $date = clone $today_date;
+                        $date->sub(new DateInterval('P1D'));
+                        break;
+                    case 'WEEKLY': $date->sub(new DateInterval('P7D')); break;
+                    case 'MONTHLY': $date->sub(new DateInterval('P1M')); break;
+                    case 'YEARLY': $date->sub(new DateInterval('P1Y')); break;
+                    default; break 2;
+                }
+            }
+
+            $date->_dateonly = true;
+
+            $engine = libcalendaring::get_recurrence();
+            $engine->init($rec['recurrence'], $date);
+
+            // check task occurrences (stop next week)
+            // FIXME: is there a faster way of doing this?
+            while ($date = $engine->next()) {
+                $date = $date->format('Y-m-d');
+
+                // break iteration asap
+                if ($date > $duedate || ($mask & self::FILTER_MASK_LATER)) {
+                    break;
+                }
+
+                if ($date == $today) {
+                    $mask |= self::FILTER_MASK_TODAY;
+                }
+                else if ($date == $tomorrow) {
+                    $mask |= self::FILTER_MASK_TOMORROW;
+                }
+                else if ($date > $tomorrow && $date <= $weeklimit) {
+                    $mask |= self::FILTER_MASK_WEEK;
+                }
+                else if ($date > $weeklimit) {
+                    $mask |= self::FILTER_MASK_LATER;
+                    break;
+                }
+            }
+        }
 
         // add masks for assigned tasks
         if ($this->is_organizer($rec) && !empty($rec['attendees']) && $this->is_attendee($rec) === false)
@@ -1262,7 +1471,7 @@ class tasklist extends rcube_plugin
         $this->rc->output->set_env('autocomplete_threads', (int)$this->rc->config->get('autocomplete_threads', 0));
         $this->rc->output->set_env('autocomplete_max', (int)$this->rc->config->get('autocomplete_max', 15));
         $this->rc->output->set_env('autocomplete_min_length', $this->rc->config->get('autocomplete_min_length'));
-        $this->rc->output->add_label('autocompletechars', 'autocompletemore', 'delete', 'libcalendaring.expandattendeegroup', 'libcalendaring.expandattendeegroupnodata');
+        $this->rc->output->add_label('autocompletechars', 'autocompletemore', 'delete', 'close', 'libcalendaring.expandattendeegroup', 'libcalendaring.expandattendeegroupnodata');
 
         $this->rc->output->set_pagetitle($this->gettext('navtitle'));
         $this->rc->output->send('tasklist.mainview');
@@ -1279,13 +1488,16 @@ class tasklist extends rcube_plugin
 
         $texts['tasklist.newtask'] = $this->gettext('createfrommail');
 
+
+        $this->ui->init_templates();
+        $this->ui->tasklists();
+
         // collect env variables
         $env = array(
-            'tasklists' => array(),
+            'tasklists' => $this->rc->output->get_env('tasklists'),
             'tasklist_settings' => $this->ui->load_settings(),
         );
 
-        $this->ui->init_templates();
         echo $this->api->output->parse('tasklist.taskedit', false, false);
 
         $script_add = '';
@@ -1390,8 +1602,9 @@ class tasklist extends rcube_plugin
         $task = rcube_utils::get_input_value('_t', rcube_utils::INPUT_GPC);
         $list = rcube_utils::get_input_value('_list', rcube_utils::INPUT_GPC);
         $id   = rcube_utils::get_input_value('_id', rcube_utils::INPUT_GPC);
+        $rev  = rcube_utils::get_input_value('_rev', rcube_utils::INPUT_GPC);
 
-        $task = array('id' => $task, 'list' => $list);
+        $task = array('id' => $task, 'list' => $list, 'rev' => $rev);
         $attachment = $this->driver->get_attachment($id, $task);
 
         // show part page
@@ -1423,7 +1636,7 @@ class tasklist extends rcube_plugin
 
         // establish imap connection
         $imap = $this->rc->get_storage();
-        $imap->set_mailbox($mbox);
+        $imap->set_folder($mbox);
         $message = new rcube_message($uid);
 
         if ($message->headers) {
@@ -1542,7 +1755,7 @@ class tasklist extends rcube_plugin
                     'class' => 'messagetasklink',
                     'rel' => $task['id'] . '@' . $task['list'],
                     'target' => '_blank',
-                ), Q($task['title']))
+                ), rcube::Q($task['title']))
             );
         }
         if (count($links)) {
@@ -1615,26 +1828,22 @@ class tasklist extends rcube_plugin
     /**
      * Get properties of the tasklist this user has specified as default
      */
-    public function get_default_tasklist($writeable = false, $confidential = false)
+    public function get_default_tasklist($sensitivity = null)
     {
         $lists = $this->driver->get_lists();
         $list = null;
 
-        if (!$list || ($writeable && !$list['editable'])) {
-            foreach ($lists as $l) {
-                if ($confidential && $l['subtype'] == 'confidential') {
-                    $list = $l;
-                    break;
-                }
-                if ($l['default']) {
-                    $list = $l;
-                    if (!$confidential)
-                        break;
-                }
+        foreach ($lists as $l) {
+            if ($sensitivity && $l['subtype'] == $sensitivity) {
+                $list = $l;
+                break;
+            }
+            if ($l['default']) {
+                $list = $l;
+            }
 
-                if (!$writeable || $l['editable']) {
-                    $first = $l;
-                }
+            if ($l['editable']) {
+                $first = $l;
             }
         }
 
@@ -1649,11 +1858,11 @@ class tasklist extends rcube_plugin
         $uid     = rcube_utils::get_input_value('_uid', rcube_utils::INPUT_POST);
         $mbox    = rcube_utils::get_input_value('_mbox', rcube_utils::INPUT_POST);
         $mime_id = rcube_utils::get_input_value('_part', rcube_utils::INPUT_POST);
-        $charset = RCMAIL_CHARSET;
+        $charset = RCUBE_CHARSET;
 
         // establish imap connection
         $imap = $this->rc->get_storage();
-        $imap->set_mailbox($mbox);
+        $imap->set_folder($mbox);
 
         if ($uid && $mime_id) {
             $part    = $imap->get_message_part($uid, $mime_id);
@@ -1677,7 +1886,7 @@ class tasklist extends rcube_plugin
 
             foreach ($tasks as $task) {
                 // save to tasklist
-                $list   = $lists[$cal_id] ?: $this->get_default_tasklist(true, $task['sensitivity'] == 'confidential');
+                $list   = $lists[$cal_id] ?: $this->get_default_tasklist($task['sensitivity']);
                 if ($list && $list['editable'] && $task['_type'] == 'task') {
                     $task = $this->from_ical($task);
                     $task['list'] = $list['id'];
@@ -1715,12 +1924,12 @@ class tasklist extends rcube_plugin
         $mbox    = rcube_utils::get_input_value('_mbox', rcube_utils::INPUT_POST);
         $mime_id = rcube_utils::get_input_value('_part', rcube_utils::INPUT_POST);
         $status  = rcube_utils::get_input_value('_status', rcube_utils::INPUT_POST);
+        $comment = rcube_utils::get_input_value('_comment', rcube_utils::INPUT_POST);
         $delete  = intval(rcube_utils::get_input_value('_del', rcube_utils::INPUT_POST));
         $noreply = intval(rcube_utils::get_input_value('_noreply', rcube_utils::INPUT_POST)) || $status == 'needs-action';
 
         $error_msg = $this->gettext('errorimportingtask');
         $success   = false;
-        $delegate = null;
 
         if ($status == 'delegated') {
             $delegates = rcube_mime::decode_address_list(rcube_utils::get_input_value('_to', rcube_utils::INPUT_POST, true), 1, false);
@@ -1738,15 +1947,19 @@ class tasklist extends rcube_plugin
 
             // forward iTip request to delegatee
             if ($delegate) {
-                $rsvpme = intval(rcube_utils::get_input_value('_rsvp', rcube_utils::INPUT_POST));
+                $rsvpme = rcube_utils::get_input_value('_rsvp', rcube_utils::INPUT_POST);
+                $itip   = $this->load_itip();
 
-                $itip = $this->load_itip();
-                if ($itip->delegate_to($task, $delegate, $rsvpme ? true : false)) {
+                $task['comment'] = $comment;
+
+                if ($itip->delegate_to($task, $delegate, !empty($rsvpme))) {
                     $this->rc->output->show_message('tasklist.itipsendsuccess', 'confirmation');
                 }
                 else {
                     $this->rc->output->command('display_message', $this->gettext('itipresponseerror'), 'error');
                 }
+
+                unset($task['comment']);
             }
 
             // find writeable list to store the task
@@ -1757,7 +1970,7 @@ class tasklist extends rcube_plugin
 
             // select default list except user explicitly selected 'none'
             if (!$list && !$dontsave) {
-                $list = $this->get_default_tasklist(true, $task['sensitivity'] == 'confidential');
+                $list = $this->get_default_tasklist($task['sensitivity']);
             }
 
             $metadata = array(
@@ -1875,23 +2088,22 @@ class tasklist extends rcube_plugin
 
                         // preserve my participant status for regular updates
                         if (empty($status)) {
-                            $emails = $this->lib->get_user_emails();
-                            foreach ($task['attendees'] as $i => $attendee) {
-                                if ($attendee['email'] && in_array(strtolower($attendee['email']), $emails)) {
-                                    foreach ($existing['attendees'] as $j => $_attendee) {
-                                        if ($attendee['email'] == $_attendee['email']) {
-                                            $task['attendees'][$i] = $existing['attendees'][$j];
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
+                            $this->lib->merge_attendees($task, $existing);
                         }
 
                         // set status=CANCELLED on CANCEL messages
                         if ($task['_method'] == 'CANCEL') {
                             $task['status'] = 'CANCELLED';
                         }
+
+                        // update attachments list, allow attachments update only on REQUEST (#5342)
+                        if ($task['_method'] == 'REQUEST') {
+                            $task['deleted_attachments'] = true;
+                        }
+                        else {
+                            unset($task['attachments']);
+                        }
+
                         // show me as free when declined (#1670)
                         if ($status == 'declined' || $task['status'] == 'CANCELLED') {
                             $task['free_busy'] = 'free';
@@ -1944,7 +2156,7 @@ class tasklist extends rcube_plugin
 
         // send iTip reply
         if ($task['_method'] == 'REQUEST' && $organizer && !$noreply && !in_array(strtolower($organizer['email']), $emails) && !$error_msg) {
-            $task['comment'] = rcube_utils::get_input_value('_comment', rcube_utils::INPUT_POST);
+            $task['comment'] = $comment;
             $itip = $this->load_itip();
             $itip->set_sender_email($reply_sender);
 
@@ -1996,7 +2208,7 @@ class tasklist extends rcube_plugin
         }
 
         if ($select) {
-            $default_list = $this->get_default_tasklist(true, $data['sensitivity'] == 'confidential');
+            $default_list = $this->get_default_tasklist($data['sensitivity']);
             $response['select'] = html::span('folder-select', $this->gettext('saveintasklist') . '&nbsp;' .
                 $select->show($default_list['id']));
         }

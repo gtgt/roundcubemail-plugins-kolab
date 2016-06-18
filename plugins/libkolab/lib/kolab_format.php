@@ -626,7 +626,7 @@ abstract class kolab_format
      *
      * @param array Hash array reference to append attachment data into
      */
-    public function get_attachments(&$object)
+    public function get_attachments(&$object, $all = false)
     {
         $this->init();
 
@@ -646,6 +646,14 @@ abstract class kolab_format
                     'mimetype' => $attach->mimetype(),
                     'size'     => strlen($content),
                     'content'  => $content,
+                );
+            }
+            else if ($all && substr($attach->uri(), 0, 4) == 'cid:') {
+                $key = $attach->uri();
+                $object['_attachments'][$key] = array(
+                    'id'       => $key,
+                    'name'     => $attach->label(),
+                    'mimetype' => $attach->mimetype(),
                 );
             }
             else if (in_array(substr($attach->uri(), 0, 4), array('http','imap'))) {
@@ -695,5 +703,69 @@ abstract class kolab_format
         if ($write) {
             $this->obj->setAttachments($vattach);
         }
+    }
+
+    /**
+     * Unified way of updating/deleting attachments of edited object
+     *
+     * @param array $object Kolab object data
+     * @param array $old    Old version of Kolab object
+     */
+    public static function merge_attachments(&$object, $old)
+    {
+        $object['_attachments'] = (array) $old['_attachments'];
+
+        // delete existing attachment(s)
+        if (!empty($object['deleted_attachments'])) {
+            foreach ($object['_attachments'] as $idx => $att) {
+                if ($object['deleted_attachments'] === true || in_array($att['id'], $object['deleted_attachments'])) {
+                    $object['_attachments'][$idx] = false;
+                }
+            }
+        }
+
+        // in kolab_storage attachments are indexed by content-id
+        foreach ((array) $object['attachments'] as $attachment) {
+            $key = null;
+
+            // Roundcube ID has nothing to do with the storage ID, remove it
+            // for uploaded/new attachments
+            // FIXME: Roundcube uses 'data', kolab_format uses 'content'
+            if ($attachment['content'] || $attachment['path'] || $attachment['data']) {
+                unset($attachment['id']);
+            }
+
+            if ($attachment['id']) {
+                foreach ((array) $object['_attachments'] as $cid => $att) {
+                    if ($att && $attachment['id'] == $att['id']) {
+                        $key = $cid;
+                    }
+                }
+            }
+            else {
+                // find attachment by name, so we can update it if exists
+                // and make sure there are no duplicates
+                foreach ((array) $object['_attachments'] as $cid => $att) {
+                    if ($att && $attachment['name'] == $att['name']) {
+                        $key = $cid;
+                    }
+                }
+            }
+
+            if ($key && $attachment['_deleted']) {
+                $object['_attachments'][$key] = false;
+            }
+            // replace existing entry
+            else if ($key) {
+                $object['_attachments'][$key] = $attachment;
+            }
+            // append as new attachment
+            else {
+                $object['_attachments'][] = $attachment;
+            }
+        }
+
+        unset($object['attachments']);
+        unset($object['deleted_attachments']);
     }
 }

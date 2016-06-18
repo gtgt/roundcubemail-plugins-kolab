@@ -67,7 +67,9 @@ class kolab_delegation extends rcube_plugin
 
             $this->add_hook('settings_actions', array($this, 'settings_actions'));
 
-            if ($this->rc->action == 'plugin.delegation' || empty($_REQUEST['_framed'])) {
+            if ($this->rc->output->type == 'html'
+                && ($this->rc->action == 'plugin.delegation' || empty($_REQUEST['_framed']))
+            ) {
                 $this->add_texts('localization/', array('deleteconfirm', 'savingdata', 'yes', 'no'));
 
                 if ($this->rc->action == 'plugin.delegation') {
@@ -80,7 +82,9 @@ class kolab_delegation extends rcube_plugin
         }
         // Calendar plugin UI bindings
         else if ($this->rc->task == 'calendar' && empty($_REQUEST['_framed'])) {
-            $this->calendar_ui();
+            if ($this->rc->output->type == 'html') {
+                $this->calendar_ui();
+            }
         }
     }
 
@@ -402,7 +406,7 @@ class kolab_delegation extends rcube_plugin
 
         foreach ($list as $id => $delegate) {
             $table->add_row(array('id' => 'rcmrow' . $id));
-            $table->add(null, Q($delegate));
+            $table->add(null, rcube::Q($delegate));
         }
 
         $this->rc->output->add_gui_object('delegatelist', $attrib['id']);
@@ -427,7 +431,7 @@ class kolab_delegation extends rcube_plugin
 
         if ($delegate) {
             $input = new html_hiddenfield(array('name' => $field_id, 'id' => $field_id, 'size' => 40));
-            $input = Q($delegate['name']) . $input->show($id);
+            $input = rcube::Q($delegate['name']) . $input->show($id);
 
             $this->rc->output->set_env('active_delegate', $id);
             $this->rc->output->command('parent.enable_command','delegate-delete', true);
@@ -520,7 +524,7 @@ class kolab_delegation extends rcube_plugin
                 }
             }
 
-            $folder_id = 'rcmf' . html_identifier($folder);
+            $folder_id = 'rcmf' . rcube_utils::html_identifier($folder);
             $names[] = $origname;
             $classes = array('mailbox');
 

@@ -1,5 +1,4 @@
 <?php
-$labels['mail'] = 'E-post';
 $labels['event'] = 'Kalendrar';
 $labels['task'] = 'Uppgifter';
 $labels['note'] = 'Anteckningar';

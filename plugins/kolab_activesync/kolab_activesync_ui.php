@@ -29,6 +29,9 @@ class kolab_activesync_ui
     private $plugin;
     public  $device = array();
 
+    const SETUP_URL = 'http://docs.kolab.org/client-configuration';
+
+
     public function __construct($plugin)
     {
         $this->plugin    = $plugin;
@@ -49,7 +52,7 @@ class kolab_activesync_ui
         foreach ($devices as $id => $device) {
             $name = $device['ALIAS'] ? $device['ALIAS'] : $id;
             $table->add_row(array('id' => 'rcmrow' . $id));
-            $table->add(null, html::span('devicealias', Q($name)) . html::span('devicetype', Q($device['TYPE'])));
+            $table->add(null, html::span('devicealias', rcube::Q($name)) . html::span('devicetype', rcube::Q($device['TYPE'])));
         }
 
         $this->rc->output->add_gui_object('devicelist', $attrib['id']);
@@ -76,8 +79,8 @@ class kolab_activesync_ui
         if (!empty($info)) {
             foreach ($info as $key => $value) {
                 if ($value) {
-                    $table->add('title', Q($this->plugin->gettext($key)));
-                    $table->add(null, Q($value));
+                    $table->add('title', rcube::Q($this->plugin->gettext($key)));
+                    $table->add(null, rcube::Q($value));
                 }
             }
         }
@@ -173,7 +176,7 @@ class kolab_activesync_ui
                 }
             }
 
-            $folder_id = 'rcmf' . html_identifier($folder);
+            $folder_id = 'rcmf' . rcube_utils::html_identifier($folder);
             $names[] = $origname;
             $classes = array('mailbox');
 
@@ -244,5 +247,31 @@ class kolab_activesync_ui
         }
 
         return $table->show();
+    }
+
+    /**
+     * Displays initial page (when no devices are registered)
+     */
+    function init_message()
+    {
+        $this->plugin->load_config();
+
+        $this->rc->output->add_handlers(array(
+                'initmessage' => array($this, 'init_message_content')
+        ));
+
+        $this->rc->output->send('kolab_activesync.configempty');
+    }
+
+    /**
+     * Handler for initmessage template object
+     */
+    function init_message_content()
+    {
+        $url  = $this->rc->config->get('activesync_setup_url', self::SETUP_URL);
+        $vars = array('url' => $url);
+        $msg  = $this->plugin->gettext(array('name' => 'nodevices', 'vars' => $vars));
+
+        return $msg;
     }
 }

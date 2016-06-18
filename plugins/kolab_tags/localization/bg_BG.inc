@@ -6,8 +6,7 @@
  *
  * For translation see https://www.transifex.com/projects/p/kolab/resource/kolab_tags/
  */
-$labels['tags'] = 'Tags';
-$labels['untag'] = 'Remove tag';
+$labels['tags'] = 'Етикети';
 $labels['edit'] = 'Промяна';
 $labels['delete'] = 'Delete';
 $labels['tagname'] = 'Име';

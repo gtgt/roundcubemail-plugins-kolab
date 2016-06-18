@@ -126,23 +126,57 @@ if (window.rcmail) {
                         rcmail.display_message(rcmail.gettext('noaddressbooksfound','kolab_addressbook'), 'info');
                 });
         }
+
+        // append button to show contact audit trail
+        if (rcmail.env.action == 'show' && rcmail.env.kolab_audit_trail && rcmail.env.cid) {
+            $('<a href="#history" class="btn-contact-history active" role="button" tabindex="0">' + rcmail.get_label('kolab_addressbook.showhistory') + '</a>')
+                .click(function(e) {
+                    var rc = rcmail.is_framed() && parent.rcmail.contact_history_dialog ? parent.rcmail : rcmail;
+                    rc.contact_history_dialog();
+                    return false;
+                })
+                .appendTo($('<div>').addClass('formbuttons-secondary-kolab').appendTo('.formbuttons'));
+        }
     });
 
     rcmail.addEventListener('listupdate', function() {
         rcmail.set_book_actions();
     });
+
+    // wait until rcmail.contact_list is ready and subscribe to 'select' events
+    setTimeout(function() {
+        rcmail.contact_list && rcmail.contact_list.addEventListener('select', function(list) {
+            var source, is_writable = true;
+
+            // delete/move commands status was set by Roundcube core,
+            // however, for Kolab addressbooks we like to check folder ACL
+            if (list.selection.length && rcmail.commands['delete']) {
+                for (n in rcmail.env.selection_sources) {
+                    source = rcmail.env.address_sources[n];
+                    if (source && source.kolab && source.rights.indexOf('t') < 0) {
+                        is_writable = false;
+                        break;
+                    }
+                }
+
+                rcmail.enable_command('delete', 'move', is_writable);
+            }
+        });
+    }, 100);
 }
 
 // (De-)activates address book management commands
 rcube_webmail.prototype.set_book_actions = function()
 {
     var source = !this.env.group ? this.env.source : null,
-        sources = this.env.address_sources;
+        sources = this.env.address_sources || {},
+        props = source && sources[source] && sources[source].kolab ? sources[source] : { removable: false, rights: '' };
 
     this.enable_command('book-create', true);
-    this.enable_command('book-edit', 'book-delete', source && sources[source] && sources[source].kolab && sources[source].editable);
-    this.enable_command('book-remove', source && sources[source] && sources[source].kolab && sources[source].removable);
-    this.enable_command('book-showurl', source && sources[source] && sources[source].carddavurl);
+    this.enable_command('book-edit',   props.rights.indexOf('a') >= 0);
+    this.enable_command('book-delete', props.rights.indexOf('x') >= 0 || props.rights.indexOf('a') >= 0);
+    this.enable_command('book-remove', props.removable);
+    this.enable_command('book-showurl', !!props.carddavurl || source == this.env.kolab_addressbook_carddav_ldap);
 };
 
 rcube_webmail.prototype.book_create = function()
@@ -174,24 +208,33 @@ rcube_webmail.prototype.book_delete = function()
 
 rcube_webmail.prototype.book_showurl = function()
 {
-    var source = this.env.source ? this.env.address_sources[this.env.source] : null;
-    if (source && source.carddavurl) {
+    var url, source;
+
+    if (this.env.source) {
+        if (this.env.source == this.env.kolab_addressbook_carddav_ldap)
+            url = this.env.kolab_addressbook_carddav_ldap_url;
+        else if (source = this.env.address_sources[this.env.source])
+            url = source.carddavurl;
+    }
+
+    if (url) {
         $('div.showurldialog:ui-dialog').dialog('close');
 
-        var $dialog = $('<div>').addClass('showurldialog').append('<p>'+rcmail.gettext('carddavurldescription', 'kolab_addressbook')+'</p>'),
+        var txt = rcmail.gettext('carddavurldescription', 'kolab_addressbook'),
+            $dialog = $('<div>').addClass('showurldialog').append('<p>' + txt + '</p>'),
             textbox = $('<textarea>').addClass('urlbox').css('width', '100%').attr('rows', 2).appendTo($dialog);
 
-          $dialog.dialog({
+        $dialog.dialog({
             resizable: true,
             closeOnEscape: true,
             title: rcmail.gettext('bookshowurl', 'kolab_addressbook'),
             close: function() {
-              $dialog.dialog("destroy").remove();
+                $dialog.dialog("destroy").remove();
             },
             width: 520
-          }).show();
+        }).show();
 
-          textbox.val(source.carddavurl).select();
+        textbox.val(url).select();
     }
 };
 
@@ -329,6 +372,220 @@ rcube_webmail.prototype.book_realname = function()
     return source != '' && sources[source] && sources[source].realname ? sources[source].realname : '';
 };
 
+// open dialog to show the current contact's changelog
+rcube_webmail.prototype.contact_history_dialog = function()
+{
+    var $dialog, rec = { cid: this.get_single_cid(), source: rcmail.env.source },
+        source = this.env.address_sources ? this.env.address_sources[rcmail.env.source] || {} : {};
+
+    if (!rec.cid || !window.libkolab_audittrail || !source.audittrail) {
+        return false;
+    }
+
+    if (this.contact_list && this.contact_list.data[rec.cid]) {
+        $.extend(rec, this.contact_list.data[rec.cid]);
+    }
+
+    // render dialog
+    $dialog = libkolab_audittrail.object_history_dialog({
+        module: 'kolab_addressbook',
+        container: '#contacthistory',
+        title: rcmail.gettext('objectchangelog','kolab_addressbook') + ' - ' + rec.name,
+
+        // callback function for list actions
+        listfunc: function(action, rev) {
+            var rec = $dialog.data('rec');
+
+            if (action == 'show') {
+                // open contact view in a dialog (iframe)
+                var dialog, iframe = $('<iframe>')
+                    .attr('id', 'contactshowrevframe')
+                    .attr('width', '100%')
+                    .attr('height', '98%')
+                    .attr('frameborder', '0')
+                    .attr('src', rcmail.url('show', { _cid: rec.cid, _source: rec.source, _rev: rev, _framed: 1 })),
+                    contentframe = $('#' + rcmail.env.contentframe)
+
+                // open jquery UI dialog
+                dialog = rcmail.show_popup_dialog(iframe, '', {}, {
+                    modal: false,
+                    resizable: true,
+                    closeOnEscape: true,
+                    title: rec.name + ' @ ' + rev,
+                    close: function() {
+                        dialog.dialog('destroy').attr('aria-hidden', 'true').remove();
+                    },
+                    minWidth: 400,
+                    width: contentframe.width() || 600,
+                    height: contentframe.height() || 400
+                });
+                dialog.css('padding', '0');
+            }
+            else {
+                rcmail.kab_loading_lock = rcmail.set_busy(true, 'loading', rcmail.kab_loading_lock);
+                rcmail.http_post('plugin.contact-' + action, { cid: rec.cid, source: rec.source, rev: rev }, rcmail.kab_loading_lock);
+            }
+        },
+
+        // callback function for comparing two object revisions
+        comparefunc: function(rev1, rev2) {
+            var rec = $dialog.data('rec');
+            rcmail.kab_loading_lock = rcmail.set_busy(true, 'loading', rcmail.kab_loading_lock);
+            rcmail.http_post('plugin.contact-diff', { cid: rec.cid, source: rec.source, rev1: rev1, rev2: rev2 }, rcmail.kab_loading_lock);
+        }
+    });
+
+    $dialog.data('rec', rec);
+
+    // fetch changelog data
+    this.kab_loading_lock = rcmail.set_busy(true, 'loading', this.kab_loading_lock);
+    this.http_post('plugin.contact-changelog', rec, this.kab_loading_lock);
+};
+
+// callback for displaying a contact's change history
+rcube_webmail.prototype.contact_render_changelog = function(data)
+{
+    var $dialog = $('#contacthistory'),
+        rec = $dialog.data('rec');
+
+    if (data === false || !data.length || !rec) {
+      // display 'unavailable' message
+      $('<div class="notfound-message note-dialog-message warning">' + rcmail.gettext('objectchangelognotavailable','kolab_addressbook') + '</div>')
+          .insertBefore($dialog.find('.changelog-table').hide());
+      return;
+    }
+
+    source = this.env.address_sources[rec.source] || {}
+    source.editable = !source.readonly
+
+    data.module = 'kolab_addressbook';
+    libkolab_audittrail.render_changelog(data, rec, source);
+};
+
+// callback for rendering a diff view of two contact revisions
+rcube_webmail.prototype.contact_show_diff = function(data)
+{
+    var $dialog = $('#contactdiff'),
+        rec = {}, namediff = { 'old': '', 'new': '', 'set': false };
+
+    if (this.contact_list && this.contact_list.data[data.cid]) {
+        rec = this.contact_list.data[data.cid];
+    }
+
+    $dialog.find('div.form-section, h2.contact-names-new').hide().data('set', false);
+    $dialog.find('div.form-section.clone').remove();
+
+    var name_props = ['prefix','firstname','middlename','surname','suffix'];
+
+    // Quote HTML entities
+    var Q = function(str){
+        return String(str).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    };
+
+    // show each property change
+    $.each(data.changes, function(i, change) {
+        var prop = change.property, r2, html = !!change.ishtml,
+            row = $('div.contact-' + prop, $dialog).first();
+
+        // special case: names
+        if ($.inArray(prop, name_props) >= 0) {
+            namediff['old'] += change['old'] + ' ';
+            namediff['new'] += change['new'] + ' ';
+            namediff['set'] = true;
+            return true;
+        }
+
+        // no display container for this property
+        if (!row.length) {
+            return true;
+        }
+
+        // clone row if already exists
+        if (row.data('set')) {
+            r2 = row.clone().addClass('clone').insertAfter(row);
+            row = r2;
+        }
+
+        // render photo as image with data: url
+        if (prop == 'photo') {
+            row.children('.diff-img-old').attr('src', change['old'] ? 'data:' + (change['old'].mimetype || 'image/gif') + ';base64,' + change['old'].base64 : 'data:image/gif;base64,R0lGODlhAQABAPAAAOjq6gAAACH/C1hNUCBEYXRhWE1QAT8AIfkEBQAAAAAsAAAAAAEAAQAAAgJEAQA7');
+            row.children('.diff-img-new').attr('src', change['new'] ? 'data:' + (change['new'].mimetype || 'image/gif') + ';base64,' + change['new'].base64 : 'data:image/gif;base64,R0lGODlhAQABAPAAAOjq6gAAACH/C1hNUCBEYXRhWE1QAT8AIfkEBQAAAAAsAAAAAAEAAQAAAgJEAQA7');
+        }
+        else if (change.diff_) {
+            row.children('.diff-text-diff').html(change.diff_);
+            row.children('.diff-text-old, .diff-text-new').hide();
+        }
+        else {
+            if (!html) {
+                // escape HTML characters
+                change.old_ = Q(change.old_ || change['old'] || '--')
+                change.new_ = Q(change.new_ || change['new'] || '--')
+            }
+            row.children('.diff-text-old').html(change.old_ || change['old'] || '--').show();
+            row.children('.diff-text-new').html(change.new_ || change['new'] || '--').show();
+        }
+
+        // display index number
+        if (typeof change.index != 'undefined') {
+            row.find('.index').html('(' + change.index + ')');
+        }
+
+        row.show().data('set', true);
+    });
+
+    // always show name
+    if (namediff.set) {
+        $('.contact-names', $dialog).html($.trim(namediff['old'] || '--')).addClass('diff-text-old').show();
+        $('.contact-names-new', $dialog).html($.trim(namediff['new'] || '--')).show();
+    }
+    else {
+        $('.contact-names', $dialog).text(rec.name).removeClass('diff-text-old').show();
+    }
+
+    // open jquery UI dialog
+    $dialog.dialog({
+        modal: false,
+        resizable: true,
+        closeOnEscape: true,
+        title: rcmail.gettext('objectdiff','kolab_addressbook').replace('$rev1', data.rev1).replace('$rev2', data.rev2),
+        open: function() {
+            $dialog.attr('aria-hidden', 'false');
+        },
+        close: function() {
+            $dialog.dialog('destroy').attr('aria-hidden', 'true').hide();
+        },
+        buttons: [
+            {
+                text: rcmail.gettext('close'),
+                click: function() { $dialog.dialog('close'); },
+                autofocus: true
+            }
+        ],
+        minWidth: 400,
+        width: 480
+    }).show();
+
+    // set dialog size according to content frame
+    libkolab_audittrail.dialog_resize($dialog.get(0), $dialog.height(), ($('#' + rcmail.env.contentframe).width() || 440) - 40);
+};
+
+
+// close the contact history dialog
+rcube_webmail.prototype.close_contact_history_dialog = function(refresh)
+{
+    $('#contacthistory, #contactdiff').each(function(i, elem) {
+        var $dialog = $(elem);
+        if ($dialog.is(':ui-dialog'))
+            $dialog.dialog('close');
+    });
+
+    // reload the contact content frame
+    if (refresh && this.get_single_cid() == refresh) {
+        this.load_contact(refresh, 'show', true);
+    }
+};
+
+
 function kolab_addressbook_contextmenu()
 {
     if (!window.rcm_callbackmenu_init) {
@@ -346,6 +603,21 @@ function kolab_addressbook_contextmenu()
                     }
                 });
             }
+            else if (menu.menu_name == 'contactlist' && rcmail.env.kolab_audit_trail) {
+                // add "Show History" item to context menu
+                menu.menu_source.push({
+                    label: rcmail.get_label('kolab_addressbook.showhistory'),
+                    command: 'contact_history_dialog',
+                    classes: 'history'
+                });
+                // enable history item if the contact source supports it
+                menu.addEventListener('activate', function(p) {
+                    if (p.command == 'contact_history_dialog') {
+                        var source = rcmail.env.address_sources ? rcmail.env.address_sources[rcmail.env.source] : {};
+                        return !!source.audittrail;
+                    }
+                });
+            }
         });
     }
 
@@ -359,26 +631,36 @@ function kolab_addressbook_contextmenu()
         }, {
             'activate': function(p) {
                 var source = !rcmail.env.group ? rcmail.env.source : null,
-                    sources = rcmail.env.address_sources;
+                    sources = rcmail.env.address_sources,
+                    props = source && sources[source] && sources[source].kolab ?
+                        sources[source] : { readonly: true, removable: false, rights: '' };
 
                 if (p.command == 'book-create') {
                     return true;
                 }
 
-                if (p.command == 'book-edit' || p.command == 'book-delete' || p.command == 'group-create') {
-                    return !!(source && sources[source] && sources[source].kolab && sources[source].editable);
+                if (p.command == 'book-edit') {
+                    return props.rights.indexOf('a') >= 0;
+                }
+
+                if (p.command == 'book-delete') {
+                    return props.rights.indexOf('a') >= 0 || props.rights.indexOf('x') >= 0;
+                }
+
+                if (p.command == 'group-create') {
+                    return !props.readonly;
                 }
 
                 if (p.command == 'book-remove') {
-                    return !!(source && sources[source] && sources[source].kolab && sources[source].removable);
+                    return props.removable;
                 }
 
                 if (p.command == 'book-showurl') {
-                    return !!(source && sources[source] && sources[source].carddavurl);
+                    return !!(props.carddavurl);
                 }
 
                 if (p.command == 'group-rename' || p.command == 'group-delete') {
-                    return !!(rcmail.env.group && sources[rcmail.env.source] && sources[rcmail.env.source].editable);
+                    return !!(rcmail.env.group && sources[rcmail.env.source] && !sources[rcmail.env.source].readonly);
                 }
 
                 return false;

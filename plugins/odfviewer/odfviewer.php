@@ -77,7 +77,7 @@ class odfviewer extends rcube_plugin
 
             // send webODF viewer page
             $html = file_get_contents($this->home . '/odf.html');
-            header("Content-Type: text/html; charset=" . RCMAIL_CHARSET);
+            header("Content-Type: text/html; charset=" . RCUBE_CHARSET);
             echo strtr($html, array(
                 '%%PARAMS%%'             => rcube_output::json_serialize($params),
                 '%%viewer.css%%'         => $this->asset_path('viewer.css'),
@@ -97,9 +97,9 @@ class odfviewer extends rcube_plugin
         $rcmail     = rcube::get_instance();
         $assets_dir = $rcmail->config->get('assets_dir');
 
-        $mtime = filemtime($this->home . '/' . $path);
+        $mtime = @filemtime($this->home . '/' . $path);
         if (!$mtime && $assets_dir) {
-            $mtime = filemtime($assets_dir . '/plugins/odfviewer/' . $path);
+            $mtime = @filemtime($assets_dir . '/plugins/odfviewer/' . $path);
         }
 
         $path = $this->urlbase . $path . ($mtime ? '?s=' . $mtime : '');

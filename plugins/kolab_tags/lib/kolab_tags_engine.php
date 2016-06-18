@@ -47,25 +47,36 @@ class kolab_tags_engine
     public function ui()
     {
         // set templates of Files UI and widgets
-        if ($this->rc->task == 'mail') {
-            $this->plugin->add_texts('localization/');
+        if ($this->rc->task != 'mail') {
+            return;
+        }
 
-            $this->plugin->include_stylesheet($this->plugin->local_skin_path().'/style.css');
-            $this->plugin->include_script('kolab_tags.js');
-            $this->rc->output->add_label('cancel', 'save');
-            $this->plugin->add_label('tags', 'add', 'edit', 'delete', 'saving',
-                'nameempty', 'nameexists', 'colorinvalid', 'untag', 'tagname',
-                'tagcolor', 'tagsearchnew', 'newtag');
+        if ($this->rc->action && !in_array($this->rc->action, array('show', 'preview'))) {
+            return;
+        }
 
-            $this->rc->output->add_handlers(array(
-                'plugin.taglist' => array($this, 'taglist'),
-            ));
+        $this->plugin->add_texts('localization/');
 
-            $ui = $this->rc->output->parse('kolab_tags.ui', false, false);
-            $this->rc->output->add_footer($ui);
+        $this->plugin->include_stylesheet($this->plugin->local_skin_path().'/style.css');
+        $this->plugin->include_script('kolab_tags.js');
+        $this->rc->output->add_label('cancel', 'save');
+        $this->plugin->add_label('tags', 'add', 'edit', 'delete', 'saving',
+            'nameempty', 'nameexists', 'colorinvalid', 'untag', 'tagname',
+            'tagcolor', 'tagsearchnew', 'newtag');
 
-            // load miniColors
-            jqueryui::miniColors();
+        $this->rc->output->add_handlers(array(
+            'plugin.taglist' => array($this, 'taglist'),
+        ));
+
+        $ui = $this->rc->output->parse('kolab_tags.ui', false, false);
+        $this->rc->output->add_footer($ui);
+
+        // load miniColors
+        jqueryui::miniColors();
+
+        // Modify search filter (and set selected tags)
+        if ($this->rc->action == 'show' || !$this->rc->action) {
+            $this->search_filter_mods();
         }
     }
 
@@ -93,6 +104,9 @@ class kolab_tags_engine
                 if ($this->backend->remove($uid)) {
                     $response['delete'][] = $uid;
                 }
+                else {
+                    $error = true;
+                }
             }
 
             // tags creation
@@ -100,12 +114,18 @@ class kolab_tags_engine
                 if ($tag = $this->backend->create($tag)) {
                     $response['add'][] = $this->parse_tag($tag);
                 }
+                else {
+                    $error = true;
+                }
             }
 
             // tags update
             foreach ($update as $tag) {
                 if ($this->backend->update($tag)) {
                     $response['update'][] = $this->parse_tag($tag);
+                }
+                else {
+                    $error = true;
                 }
             }
 
@@ -132,6 +152,7 @@ class kolab_tags_engine
         $filter  = $tag == '*' ? array() : array(array('uid', '=', explode(',', $tag)));
         $taglist = $this->backend->list_tags($filter);
         $filter  = array();
+        $tags    = array();
 
         foreach (rcmail::get_uids() as $mbox => $uids) {
             if ($uids === '*') {
@@ -181,6 +202,8 @@ class kolab_tags_engine
                     $error = true;
                 }
             }
+
+            $tags[] = $tag['uid'];
         }
 
         if ($error) {
@@ -191,6 +214,7 @@ class kolab_tags_engine
         }
         else {
             $this->rc->output->show_message($this->plugin->gettext('untaggingsuccess'), 'confirmation');
+            $this->rc->output->command('plugin.kolab_tags', array('mark' => 1, 'delete' => $tags));
         }
     }
 
@@ -265,6 +289,12 @@ class kolab_tags_engine
     public function taglist($attrib)
     {
         $taglist = $this->backend->list_tags();
+
+        // Performance: Save the list for later
+        if ($this->rc->action == 'show' || $this->rc->action == 'preview') {
+            $this->taglist = $taglist;
+        }
+
         $taglist = array_map(array($this, 'parse_tag'), $taglist);
 
         $this->rc->output->set_env('tags', $taglist);
@@ -316,7 +346,7 @@ class kolab_tags_engine
      */
     public function message_headers_handler($args)
     {
-        $taglist = $this->backend->list_tags();
+        $taglist = $this->taglist ?: $this->backend->list_tags();
         $uid     = $args['uid'];
         $folder  = $args['folder'];
         $tags    = array();
@@ -416,6 +446,26 @@ class kolab_tags_engine
         }
 
         return $args;
+    }
+
+    /**
+     * Get selected tags when in search-mode
+     */
+    protected function search_filter_mods()
+    {
+       if (!empty($_REQUEST['_search']) && !empty($_SESSION['search'])
+            && $_SESSION['search_request'] == $_REQUEST['_search']
+            && ($filter = $_SESSION['search_filter'])
+       ) {
+            if (preg_match('/^(kolab_tags_[0-9]{10,}:([^:]+):)/', $filter, $m)) {
+                $search_tags   = explode(',', $m[2]);
+                $search_filter = substr($filter, strlen($m[1]));
+
+                // send current search properties to the browser
+                $this->rc->output->set_env('search_filter_selected', $search_filter);
+                $this->rc->output->set_env('selected_tags', $search_tags);
+            }
+        }
     }
 
     /**

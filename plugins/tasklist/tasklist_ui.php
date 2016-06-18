@@ -5,7 +5,7 @@
  * @version @package_version@
  * @author Thomas Bruederli <bruederli@kolabsys.com>
  *
- * Copyright (C) 2012, Kolab Systems AG <contact@kolabsys.com>
+ * Copyright (C) 2012-2015, Kolab Systems AG <contact@kolabsys.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -52,6 +52,10 @@ class tasklist_ui
             'innerclass' => 'button-inner',
             'label'      => 'tasklist.navtitle',
         ), 'taskbar');
+
+        if ($this->rc->action && !in_array($this->rc->action, array('show', 'preview', 'print', 'index'))) {
+            return;
+        }
 
         $this->plugin->include_stylesheet($this->plugin->local_skin_path() . '/tasklist.css');
 
@@ -156,6 +160,7 @@ class tasklist_ui
         $this->plugin->register_handler('plugin.identity_select', array($this, 'identity_select'));
         $this->plugin->register_handler('plugin.edit_attendees_notify', array($this, 'edit_attendees_notify'));
         $this->plugin->register_handler('plugin.task_rsvp_buttons', array($this->plugin->itip, 'itip_rsvp_buttons'));
+        $this->plugin->register_handler('plugin.object_changelog_table', array('libkolab', 'object_changelog_table'));
 
         jqueryui::tagedit();
 
@@ -165,6 +170,7 @@ class tasklist_ui
         // include kolab folderlist widget if available
         if (in_array('libkolab', $this->plugin->api->loaded_plugins())) {
             $this->plugin->api->include_script('libkolab/js/folderlist.js');
+            $this->plugin->api->include_script('libkolab/js/audittrail.js');
         }
     }
 
@@ -248,12 +254,13 @@ class tasklist_ui
             $prop['sortable']    = $this->plugin->driver->sortable;
             $prop['attachments'] = $this->plugin->driver->attachments;
             $prop['attendees']   = $this->plugin->driver->attendees;
+            $prop['caldavurl']   = $this->plugin->driver->tasklist_caldav_url($prop);
             $jsenv[$id] = $prop;
         }
 
         $classes = array('tasklist');
         $title = $prop['title'] ?: ($prop['name'] != $prop['listname'] || strlen($prop['name']) > 25 ?
-          html_entity_decode($prop['name'], ENT_COMPAT, RCMAIL_CHARSET) : '');
+          html_entity_decode($prop['name'], ENT_COMPAT, RCUBE_CHARSET) : '');
 
         if ($prop['virtual'])
             $classes[] = 'virtual';
@@ -309,7 +316,7 @@ class tasklist_ui
         $default = null;
 
         foreach ((array)$this->plugin->driver->get_lists() as $id => $prop) {
-            if ($prop['editable']) {
+            if ($prop['editable'] || strpos($prop['rights'], 'i') !== false) {
                 $select->add($prop['name'], $id);
                 if (!$default || $prop['default'])
                     $default = $id;
@@ -352,6 +359,7 @@ class tasklist_ui
      */
     function alarm_select($attrib = array())
     {
+        $attrib['_type'] = 'task';
         return $this->plugin->lib->alarm_select($attrib, $this->plugin->driver->alarm_types, $this->plugin->driver->alarm_absolute);
     }
 
@@ -431,7 +439,7 @@ class tasklist_ui
             $attrib['id'] = 'rcmtaskuploadform';
 
         // Get max filesize, enable upload progress bar
-        $max_filesize = rcube_upload_init();
+        $max_filesize = $this->rc->upload_init();
 
         $button = new html_inputfield(array('type' => 'button'));
         $input = new html_inputfield(array(
@@ -443,9 +451,9 @@ class tasklist_ui
 
         return html::div($attrib,
             html::div(null, $input->show()) .
-            html::div('formbuttons', $button->show(rcube_label('upload'), array('class' => 'button mainaction',
-                'onclick' => JS_OBJECT_NAME . ".upload_file(this.form)"))) .
-            html::div('hint', rcube_label(array('name' => 'maxuploadsize', 'vars' => array('size' => $max_filesize))))
+            html::div('buttons', $button->show($this->rc->gettext('upload'), array('class' => 'button mainaction',
+                'onclick' => rcmail_output::JS_OBJECT_NAME . ".upload_file(this.form)"))) .
+            html::div('hint', $this->rc->gettext(array('name' => 'maxuploadsize', 'vars' => array('size' => $max_filesize))))
         );
     }
 

@@ -23,11 +23,12 @@
 
 class kolab_storage_cache_contact extends kolab_storage_cache
 {
-    protected $extra_cols = array('type','name','firstname','surname','email');
-    protected $binary_items = array(
+    protected $extra_cols_max = 255;
+    protected $extra_cols     = array('type','name','firstname','surname','email');
+    protected $binary_items   = array(
         'photo'          => '|<photo><uri>[^;]+;base64,([^<]+)</uri></photo>|i',
-        'pgppublickey'   => '|<key><uri>date:application/pgp-keys;base64,([^<]+)</uri></key>|i',
-        'pkcs7publickey' => '|<key><uri>date:application/pkcs7-mime;base64,([^<]+)</uri></key>|i',
+        'pgppublickey'   => '|<key><uri>data:application/pgp-keys;base64,([^<]+)</uri></key>|i',
+        'pkcs7publickey' => '|<key><uri>data:application/pkcs7-mime;base64,([^<]+)</uri></key>|i',
     );
 
     /**
@@ -52,6 +53,18 @@ class kolab_storage_cache_contact extends kolab_storage_cache
         // avoid value being null
         if (empty($sql_data['email'])) {
             $sql_data['email'] = '';
+        }
+
+        // use organization if name is empty
+        if (empty($sql_data['name']) && !empty($object['organization'])) {
+            $sql_data['name'] = rcube_charset::clean($object['organization']);
+        }
+
+        // make sure some data is not longer that database limit (#5291)
+        foreach ($this->extra_cols as $col) {
+            if (strlen($sql_data[$col]) > $this->extra_cols_max) {
+                $sql_data[$col] = rcube_charset::clean(substr($sql_data[$col], 0,  $this->extra_cols_max));
+            }
         }
 
         return $sql_data;

@@ -6,7 +6,7 @@
  * @licstart  The following is the entire license notice for the
  * JavaScript code in this file.
  *
- * Copyright (C) 2011, Kolab Systems AG <contact@kolabsys.com>
+ * Copyright (C) 2011-2015, Kolab Systems AG <contact@kolabsys.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -29,28 +29,7 @@ window.rcmail && window.files_api && rcmail.addEventListener('init', function() 
   if (rcmail.task == 'mail') {
     // mail compose
     if (rcmail.env.action == 'compose') {
-      var elem = $('#compose-attachments > div'),
-        input = $('<input class="button" type="button">')
-          .attr('tabindex', $('input', elem).attr('tabindex') || 0)
-          .val(rcmail.gettext('kolab_files.fromcloud'))
-          .click(function() { kolab_files_selector_dialog(); })
-          .appendTo(elem);
-
-      if (rcmail.gui_objects.filelist) {
-        rcmail.file_list = new rcube_list_widget(rcmail.gui_objects.filelist, {
-          multiselect: true,
-          keyboard: true,
-          column_movable: false,
-          dblclick_time: rcmail.dblclick_time
-        });
-        rcmail.file_list.addEventListener('select', function(o) { kolab_files_list_select(o); })
-          .addEventListener('listupdate', function(e) { rcmail.triggerEvent('listupdate', e); });
-
-        rcmail.enable_command('files-sort', 'files-search', 'files-search-reset', true);
-
-        rcmail.file_list.init();
-        kolab_files_list_coltypes();
-      }
+      kolab_files_from_cloud_widget($('#compose-attachments > div'));
 
       // register some commands to skip warning message on compose page
       $.merge(rcmail.env.compose_commands, ['files-list', 'files-sort', 'files-search', 'files-search-reset']);
@@ -74,55 +53,82 @@ window.rcmail && window.files_api && rcmail.addEventListener('init', function() 
       rcmail.enable_command('folder-create', true);
     }
 
-    kolab_files_init();
+    if (!rcmail.env.action || rcmail.env.action == 'show' || rcmail.env.action == 'preview') {
+      // add "attach from cloud" button for event/task dialog in mail
+      rcmail.addEventListener('plugin.mail2event_dialog', function() {
+        if (!$('#calendar-attachment-form input.fromcloud').length)
+          kolab_files_from_cloud_widget($('#calendar-attachment-form > div.buttons'));
+      });
+    }
+  }
+  else if (rcmail.task == 'calendar') {
+    // add "attach from cloud" button for event dialog
+    if (!rcmail.env.action)
+      kolab_files_from_cloud_widget($('#calendar-attachment-form > div.buttons'));
+  }
+  else if (rcmail.task == 'tasks') {
+    // add "attach from cloud" button for task dialog
+    if (!rcmail.env.action)
+      kolab_files_from_cloud_widget($('#taskedit-attachment-form > div.buttons'));
   }
   else if (rcmail.task == 'files') {
-    if (rcmail.gui_objects.filelist) {
-      rcmail.file_list = new rcube_list_widget(rcmail.gui_objects.filelist, {
+    if (rcmail.gui_objects.fileslist) {
+      rcmail.fileslist = new rcube_list_widget(rcmail.gui_objects.fileslist, {
         multiselect: true,
         draggable: true,
         keyboard: true,
-        column_movable: rcmail.env.col_movable,
+        column_movable: rcmail.env.files_col_movable,
         dblclick_time: rcmail.dblclick_time
       });
-/*
-      rcmail.file_list.row_init = function(o){ kolab_files_init_file_row(o); };
-      rcmail.file_list.addEventListener('dblclick', function(o){ p.msglist_dbl_click(o); });
-      rcmail.file_list.addEventListener('click', function(o){ p.msglist_click(o); });
-      rcmail.file_list.addEventListener('keypress', function(o){ p.msglist_keypress(o); });
-      rcmail.file_list.addEventListener('dragstart', function(o){ p.drag_start(o); });
-      rcmail.file_list.addEventListener('dragmove', function(e){ p.drag_move(e); });
-*/
-      rcmail.file_list.addEventListener('dblclick', function(o) { kolab_files_list_dblclick(o); })
+
+      rcmail.fileslist.addEventListener('dblclick', function(o) { kolab_files_list_dblclick(o); })
         .addEventListener('select', function(o) { kolab_files_list_select(o); })
         .addEventListener('keypress', function(o) { kolab_files_list_keypress(o); })
+        .addEventListener('dragstart', function(e) { kolab_files_drag_start(e); })
+        .addEventListener('dragmove', function(e) { kolab_files_drag_move(e); })
         .addEventListener('dragend', function(e) { kolab_files_drag_end(e); })
-        .addEventListener('column_replace', function(e) { kolab_files_set_coltypes(e); })
+        .addEventListener('column_replace', function(e) { kolab_files_set_coltypes(e, 'files'); })
         .addEventListener('listupdate', function(e) { rcmail.triggerEvent('listupdate', e); });
 
       rcmail.enable_command('menu-open', 'menu-save', 'files-sort', 'files-search', 'files-search-reset', 'folder-create', true);
 
-      rcmail.file_list.init();
-      kolab_files_list_coltypes();
-      kolab_files_drag_drop_init($(rcmail.gui_objects.filelist).parents('.droptarget'));
+      rcmail.fileslist.init();
+      kolab_files_list_coltypes('files');
+      kolab_files_drag_drop_init($(rcmail.gui_objects.fileslist).parents('.droptarget'));
+    }
+
+    if (rcmail.gui_objects.sessionslist) {
+      rcmail.sessionslist = new rcube_list_widget(rcmail.gui_objects.sessionslist, {
+        keyboard: true,
+        column_movable: rcmail.env.sessions_col_movable,
+        dblclick_time: rcmail.dblclick_time
+      });
+
+      rcmail.sessionslist.addEventListener('dblclick', function(o) { kolab_files_sessions_list_dblclick(o); })
+        .addEventListener('select', function(o) { kolab_files_sessions_list_select(o); })
+        .addEventListener('keypress', function(o) { kolab_files_sessions_list_keypress(o); })
+        .addEventListener('column_replace', function(e) { kolab_files_set_coltypes(e, 'sessions'); })
+        .addEventListener('listupdate', function(e) { rcmail.triggerEvent('listupdate', e); });
+
+      rcmail.sessionslist.init();
+      kolab_files_list_coltypes('sessions');
     }
 
     // "one file only" commands
-    rcmail.env.file_commands = ['files-get'];
+    rcmail.env.file_commands = ['files-get', 'files-rename'];
     // "one or more file" commands
     rcmail.env.file_commands_all = ['files-delete', 'files-move', 'files-copy'];
 
-    kolab_files_init();
-
-    if (rcmail.env.action == 'open') {
-      rcmail.enable_command('files-get', 'files-delete', rcmail.env.file);
+    if (rcmail.env.action == 'open' || rcmail.env.action == 'edit') {
+      rcmail.enable_command('files-get', true);
+      rcmail.enable_command('files-delete', rcmail.env.file_data.writable);
     }
     else {
-      file_api.folder_list();
-      file_api.browser_capabilities_check();
       rcmail.enable_command('folder-mount', rcmail.env.external_sources);
     }
   }
+
+  kolab_files_init();
 });
 
 
@@ -136,6 +142,8 @@ function kolab_files_init()
   if (window.file_api)
     return;
 
+  var manticore_config = {};
+
   // Initialize application object (don't change var name!)
   file_api = $.extend(new files_api(), new kolab_files_ui());
 
@@ -146,10 +154,66 @@ function kolab_files_init()
     sort_reverse: false,
     search_threads: rcmail.env.search_threads,
     resources_dir: rcmail.assets_path('program/resources'),
+    caps: rcmail.env.files_caps,
     supported_mimetypes: rcmail.env.file_mimetypes
   });
 
   file_api.translations = rcmail.labels;
+
+  if (rcmail.task == 'files') {
+    if (rcmail.env.action == 'edit' && rcmail.env.file_data.viewer && rcmail.env.file_data.viewer.manticore) {
+      manticore_config = {
+        // UI elements
+        iframe: $('#fileframe').get(0),
+        export_menu: rcmail.gui_objects.exportmenu ? $('ul', rcmail.gui_objects.exportmenu).get(0) : null,
+        title_input: $('#document-title').get(0),
+        members_list: $('#members').get(0),
+        photo_url: '?_task=addressbook&_action=photo&_error=1&_email=%email',
+        photo_default_url: rcmail.env.photo_placeholder,
+        // events
+        ready: function(data) { manticore_init(); },
+        sessionClosed: function(data) { return manticore_close(); }
+      };
+
+      if (rcmail.env.file_data.writable)
+        manticore_config.documentChanged = function(data) { rcmail.enable_command('document-save', true); };
+    }
+    else if (rcmail.env.action == 'open') {
+      // initialize folders list (for dialogs)
+      file_api.folder_list();
+
+      // get ongoing sessions
+      file_api.request('folder_info', {folder: file_api.file_path(rcmail.env.file), sessions: 1}, 'folder_info_response');
+    }
+    else {
+      file_api.folder_list();
+      file_api.browser_capabilities_check();
+    }
+  }
+
+  if (rcmail.env.files_caps && rcmail.env.files_caps.MANTICORE && !rcmail.env.framed)
+    $.extend(manticore_config, {
+      // invitation notifications
+      api: file_api,
+      owner: rcmail.env.files_user,
+      interval: rcmail.env.files_interval || 60,
+      invitationMore: true,
+      invitationChange: manticore_invitation_handler
+    });
+
+  $.extend(manticore_config, {
+    // notifications/alerts
+    gettext: function(label) { return rcmail.get_label('kolab_files.' + label); },
+    set_busy: function(state, message) { return rcmail.set_busy(state, message ? 'kolab_files.' + message : ''); },
+    hide_message: function(id) { return rcmail.hide_message(id); },
+    display_message: function(label, type, is_txt, timeout) {
+      if (!is_txt)
+        label = 'kolab_files.' + label;
+      return rcmail.display_message(label, type, timeout * 1000);
+    }
+  });
+
+  manticore = new manticore_api(manticore_config);
 };
 
 // returns API authorization token
@@ -159,6 +223,31 @@ function kolab_files_token()
   // it's because keep-alive is not requested in frames
   return window.parent && parent.rcmail && parent.rcmail.env.files_token ? parent.rcmail.env.files_token : rcmail.env.files_token;
 };
+
+function kolab_files_from_cloud_widget(elem)
+{
+  var input = $('<input class="button fromcloud" type="button">')
+      .attr('tabindex', $('input', elem).attr('tabindex') || 0)
+      .val(rcmail.gettext('kolab_files.fromcloud'))
+      .click(function() { kolab_files_selector_dialog(); })
+      .appendTo(elem);
+
+  if (rcmail.gui_objects.fileslist) {
+    rcmail.fileslist = new rcube_list_widget(rcmail.gui_objects.fileslist, {
+      multiselect: true,
+      keyboard: true,
+      column_movable: false,
+      dblclick_time: rcmail.dblclick_time
+    });
+    rcmail.fileslist.addEventListener('select', function(o) { kolab_files_list_select(o); })
+      .addEventListener('listupdate', function(e) { rcmail.triggerEvent('listupdate', e); });
+
+    rcmail.enable_command('files-sort', 'files-search', 'files-search-reset', true);
+
+    rcmail.fileslist.init();
+    kolab_files_list_coltypes();
+  }
+}
 
 // folder selection dialog
 function kolab_directory_selector_dialog(id)
@@ -178,7 +267,7 @@ function kolab_directory_selector_dialog(id)
     if (!filename) {
       attach = attach.clone();
       $('.attachment-size', attach).remove();
-      filename = attach.text();
+      filename = $.trim(attach.text());
     }
 
     form.show();
@@ -201,6 +290,9 @@ function kolab_directory_selector_dialog(id)
   $('#foldercreatelink').attr('tabindex', 0);
 
   buttons[rcmail.gettext('kolab_files.save')] = function () {
+    if (!file_api.env.folder)
+      return;
+
     var lock = rcmail.set_busy(true, 'saving'),
       request = {
         act: 'save-file',
@@ -224,7 +316,9 @@ function kolab_directory_selector_dialog(id)
 
   if (!rcmail.env.folders_loaded) {
     fn = function() {
-      file_api.folder_list();
+      rcmail.env.folder_list_selector = '#files-dialog #files-folder-list';
+      rcmail.env.folder_search_selector = '#files-dialog #foldersearch';
+      file_api.folder_list({writable: 1});
       rcmail.env.folders_loaded = true;
     };
   }
@@ -236,12 +330,12 @@ function kolab_directory_selector_dialog(id)
     button_classes: ['mainaction'],
     minWidth: 250,
     minHeight: 300,
-    height: 350,
+    height: 400,
     width: 300
   }, fn);
 
   // "enable" folder creation when dialog is displayed in parent window
-  if (rcmail.is_framed() && !parent.rcmail.folder_create) {
+  if (rcmail.is_framed()) {
     parent.rcmail.enable_command('folder-create', true);
     parent.rcmail.folder_create = function() {
       win.kolab_files_folder_create_dialog();
@@ -256,7 +350,7 @@ function kolab_files_selector_dialog()
 
   buttons[rcmail.gettext('kolab_files.attachsel')] = function () {
     var list = [];
-    $('#filelist tr.selected').each(function() {
+    $('#fileslist tr.selected').each(function() {
       list.push($(this).data('file'));
     });
 
@@ -292,14 +386,16 @@ function kolab_files_selector_dialog()
     minHeight: 300,
     width: 700,
     height: 500
-  });
+  }, function() { rcmail.fileslist.resize(); });
 
   if (!rcmail.env.files_loaded) {
+    rcmail.env.folder_list_selector = '#files-compose-dialog #files-folder-list';
+    rcmail.env.folder_search_selector = '#files-compose-dialog #foldersearch';
     file_api.folder_list();
     rcmail.env.files_loaded = true;
   }
   else {
-    rcmail.file_list.clear_selection();
+    rcmail.fileslist.clear_selection();
   }
 };
 
@@ -353,25 +449,14 @@ function kolab_files_folder_create_dialog()
   $('form', dialog).submit(kolab_dialog_submit_handler);
 
   // build parent selector
-  select.append($('<option>').val('').text('---'));
-  $.each(file_api.env.folders, function(i, f) {
-    var n, option = $('<option>'), name = escapeHTML(f.name);
-
-    for (n=0; n<f.depth; n++)
-      name = '&nbsp;&nbsp;&nbsp;' + name;
-
-    option.val(i).html(name).appendTo(select);
-
-    if (i == file_api.env.folder)
-      option.attr('selected', true);
-  });
+  file_api.folder_select_element(select, {empty: true, writable: true});
 };
 
 // folder edit dialog
 function kolab_files_folder_edit_dialog()
 {
   var dialog = $('#files-folder-edit-dialog'),
-    buttons = {}, options = [],
+    buttons = {},
     separator = file_api.env.directory_separator,
     arr = file_api.env.folder.split(separator),
     folder = arr.pop(),
@@ -409,17 +494,7 @@ function kolab_files_folder_edit_dialog()
   $('form', dialog).submit(kolab_dialog_submit_handler);
 
   // build parent selector
-  options.push($('<option>').val('').text('---'));
-  $.each(file_api.env.folders, function(i, f) {
-    var n, name = escapeHTML(f.name);
-
-    for (n=0; n<f.depth; n++)
-      name = '&nbsp;&nbsp;&nbsp;' + name;
-
-    options.push($('<option>').val(i).html(name));
-  });
-
-  select.append(options).val(path);
+  file_api.folder_select_element(select, {selected: path, empty: true});
 };
 
 // folder mounting dialog
@@ -483,14 +558,106 @@ function kolab_files_folder_mount_dialog()
   });
 };
 
-// file edition dialog
-function kolab_files_file_edit_dialog(file)
+// file edit dialog
+function kolab_files_file_edit_dialog(file, sessions, readonly)
 {
-  var dialog = $('#files-file-edit-dialog'),
+  var content = [], items = [], height = 300,
+    dialog = $('#files-file-edit-dialog'),
+    buttons = {}, name = file_api.file_name(file),
+    title = rcmail.gettext('kolab_files.editfiledialog'),
+    mainaction = rcmail.gettext('kolab_files.select'),
+    item_fn = function(id, txt, classes) {
+        return $('<label>').attr('class', 'session' + (classes ? ' ' + classes : ''))
+          .append($('<input>').attr({name: 'opt', value: id, type: 'radio'})).append($('<span>').text(txt));
+      },
+    select_fn = function(dlg) {
+      var session, input = $('input:checked', dialog), id = input.val();
+
+      if (dlg)
+        kolab_dialog_close(dlg);
+
+      if (id && input.parent().is('.session.request')) {
+        manticore.invitation_request({session_id: id});
+        return;
+      }
+
+      if (readonly && (id == 0 || !input.length))
+        return kolab_files_file_create_dialog(file);
+
+      rcmail.files_edit(id ? id : true);
+    };
+
+  // Create sessions selection
+  if (sessions && sessions.length) {
+    items.push($('<div>').text(rcmail.gettext('kolab_files.editfilesessions')));
+
+    // first display owned sessions, then invited, other at the end
+    $.each(sessions, function() {
+      if (this.is_owner) {
+        var txt = rcmail.gettext('kolab_files.ownedsession');
+        items.push(item_fn(this.id, txt, 'owner'));
+      }
+    });
+
+    if (items.length == 1)
+      items.push(item_fn(0, rcmail.gettext('kolab_files.newsession' + (readonly ? 'ro' : ''))));
+
+    $.each(sessions, function() {
+      if (this.is_invited) {
+        var txt = rcmail.gettext('kolab_files.invitedsession')
+          .replace('$user', this.owner_name ? this.owner_name : this.owner);
+        items.push(item_fn(this.id, txt, 'invited'));
+      }
+    });
+
+    $.each(sessions, function() {
+      if (!this.is_owner && !this.is_invited) {
+        var txt = rcmail.gettext('kolab_files.joinsession')
+          .replace('$user', this.owner_name ? this.owner_name : this.owner);
+        items.push(item_fn(this.id, txt, 'request'));
+      }
+    });
+
+    // check the first option
+    $('input', items[1]).attr('checked', true);
+
+    $('div', dialog).html(items);
+
+    // if there's only one session and it's owned, skip the dialog
+    if (!readonly && items.length == 2 && $('input:checked', dialog).parent().is('.owner'))
+      return select_fn();
+  }
+  // no ongoing session, folder is readonly warning
+  else {
+    title = rcmail.gettext('kolab_files.editfilerotitle');
+    height = 150;
+    $('div', dialog).text(rcmail.gettext('kolab_files.editfilero'));
+    mainaction = rcmail.gettext('kolab_files.create');
+  }
+
+  buttons[mainaction] = function() { select_fn(this); };
+  buttons[rcmail.gettext('kolab_files.cancel')] = function () {
+    kolab_dialog_close(this);
+  };
+
+  // show dialog window
+  kolab_dialog_show(dialog, {
+    title: title,
+    buttons: buttons,
+    button_classes: ['mainaction'],
+    minHeight: height - 100,
+    height: height
+  });
+};
+
+// file rename dialog
+function kolab_files_file_rename_dialog(file)
+{
+  var dialog = $('#files-file-rename-dialog'),
     buttons = {}, name = file_api.file_name(file)
     input = $('input[name="name"]', dialog).val(name);
 
-  buttons[rcmail.gettext('kolab_files.save')] = function () {
+  buttons[rcmail.gettext('kolab_files.save')] = function() {
     var folder = file_api.file_path(file), name = input.val();
 
     if (!name)
@@ -498,12 +665,12 @@ function kolab_files_file_edit_dialog(file)
 
     name = folder + file_api.env.directory_separator + name;
 
-    // @TODO: now we only update filename
     if (name != file)
       file_api.file_rename(file, name);
+
     kolab_dialog_close(this);
   };
-  buttons[rcmail.gettext('kolab_files.cancel')] = function () {
+  buttons[rcmail.gettext('kolab_files.cancel')] = function() {
     kolab_dialog_close(this);
   };
 
@@ -512,9 +679,141 @@ function kolab_files_file_edit_dialog(file)
 
   // show dialog window
   kolab_dialog_show(dialog, {
-    title: rcmail.gettext('kolab_files.fileedit'),
+    title: rcmail.gettext('kolab_files.renamefile'),
     buttons: buttons,
-    button_classes: ['mainaction']
+    button_classes: ['mainaction'],
+    minHeight: 100,
+    height: 200
+  });
+};
+
+// file creation (or cloning) dialog
+function kolab_files_file_create_dialog(file)
+{
+  var buttons = {}, action = file ? 'copy' : 'create',
+    dialog = $('#files-file-create-dialog'),
+    type_select = $('select[name="type"]', dialog),
+    select = $('select[name="parent"]', dialog).html(''),
+    input = $('input[name="name"]', dialog).val(''),
+    create_func = function(dialog, editaction) {
+      var sel, folder = select.val(), type = type_select.val(), name = input.val();
+
+      if (!name || !folder)
+        return;
+
+      if (!/\.[a-z0-9]{1,5}$/.test(name)) {
+        name += '.' + rcmail.env.file_extensions[type];
+      }
+
+      name = folder + file_api.env.directory_separator + name;
+
+      // get type of cloned file
+      if (file) {
+        if (rcmail.env.file_data)
+          type = rcmail.env.file_data.type;
+        else {
+          sel = rcmail.fileslist.get_selection();
+          type = $('#rcmrow' + sel[0]).data('type');
+        }
+      }
+
+      file_api.file_create(name, type, editaction, file);
+      kolab_dialog_close(dialog);
+  };
+
+  buttons[rcmail.gettext('kolab_files.' + action + 'andedit')] = function() {
+    create_func(this, true);
+  };
+
+  if (action == 'create') {
+    buttons[rcmail.gettext('kolab_files.create')] = function() {
+      create_func(this);
+    };
+    type_select.parent('tr').show();
+  }
+  else {
+    input.val(file_api.file_name(file));
+    type_select.parent('tr').hide();
+  }
+
+  buttons[rcmail.gettext('kolab_files.cancel')] = function() {
+    kolab_dialog_close(this);
+  };
+
+  // Fix submitting form with Enter
+  $('form', dialog).submit(kolab_dialog_submit_handler);
+
+  // show dialog window
+  kolab_dialog_show(dialog, {
+    title: rcmail.gettext('kolab_files.' + action + 'file'),
+    buttons: buttons,
+    button_classes: ['mainaction'],
+    minHeight: 150,
+    height: 250
+  });
+
+  // build folder selector
+  file_api.folder_select_element(select, {writable: true});
+};
+
+// file session dialog
+function kolab_files_session_dialog(session)
+{
+  var buttons = {},
+    dialog = $('#files-session-dialog'),
+    filename = file_api.file_name(session.file),
+    owner = session.owner_name || session.owner,
+    title = rcmail.gettext('kolab_files.sessiondialog'),
+    content = rcmail.gettext('kolab_files.sessiondialogcontent'),
+    button_classes = ['mainaction'],
+    join_session = function(id) {
+      var viewer = file_api.file_type_supported('application/vnd.oasis.opendocument.text', rcmail.env.files_caps);
+        params = {action: 'edit', session: id};
+
+      file_api.file_open('', viewer, params);
+    };
+
+  content = content.replace('$file', filename).replace('$owner', owner);
+  $('div', dialog).text(content);
+
+  if (session.is_owner) {
+    buttons[rcmail.gettext('kolab_files.open')] = function() {
+      kolab_dialog_close(this);
+      join_session(session.id);
+    };
+    buttons[rcmail.gettext('kolab_files.close')] = function() {
+      kolab_dialog_close(this);
+      file_api.document_delete(session.id);
+    };
+    button_classes.push('delete');
+  }
+  else if (session.is_invited) {
+    // @TODO: check if not-accepted and provide "Decline invitation" button
+    // @TODO: Add "Accept button", add comment field to the dialog
+    buttons[rcmail.gettext('kolab_files.join')] = function() {
+      kolab_dialog_close(this);
+      join_session(session.id);
+    };
+  }
+  else {
+    buttons[rcmail.gettext('kolab_files.request')] = function() {
+      kolab_dialog_close(this);
+      // @TODO: Add comment field to the dialog
+      manticore.invitation_request({session_id: session.id});
+    };
+  }
+
+  buttons[rcmail.gettext('kolab_files.cancel')] = function() {
+    kolab_dialog_close(this);
+  };
+
+  // show dialog window
+  kolab_dialog_show(dialog, {
+    title: title,
+    buttons: buttons,
+    button_classes: button_classes,
+    minHeight: 100,
+    height: 150
   });
 };
 
@@ -523,7 +822,6 @@ function kolab_dialog_show(content, params, onopen)
   params = $.extend({
     modal: true,
     resizable: true,
-    closeOnEscape: (!bw.ie6 && !bw.ie7),  // disabled for performance reasons
     minWidth: 400,
     minHeight: 300,
     width: 500,
@@ -546,6 +844,8 @@ function kolab_dialog_show(content, params, onopen)
     }
 
     (elem && elem.length ? elem : window).focus();
+
+    rcmail.ksearch_blur();
   };
 
   // display it as popup
@@ -632,14 +932,16 @@ function kolab_files_upload_input(button)
 /***********************************************************/
 
 // for reordering column array (Konqueror workaround)
-// and for setting some message list global variables
-kolab_files_list_coltypes = function()
+// and for setting some files/sessions list global variables
+function kolab_files_list_coltypes(type)
 {
-  var n, list = rcmail.file_list;
+  if (!type) type = 'files';
+
+  var n, list = rcmail[type + 'list'];
 
   rcmail.env.subject_col = null;
 
-  if ((n = $.inArray('name', rcmail.env.coltypes)) >= 0) {
+  if ((n = $.inArray('name', rcmail.env[type + '_coltypes'])) >= 0) {
     rcmail.env.subject_col = n;
     list.subject_col = n;
   }
@@ -647,18 +949,19 @@ kolab_files_list_coltypes = function()
   list.init_header();
 };
 
-kolab_files_set_list_options = function(cols, sort_col, sort_order)
+function kolab_files_set_list_options(cols, sort_col, sort_order, type)
 {
-  var update = 0, i, idx, name, newcols = [], oldcols = rcmail.env.coltypes;
+  var update = 0, i, idx, name, newcols = [], oldcols = rcmail.env[type + '_coltypes'];
 
   if (sort_col === undefined)
-    sort_col = rcmail.env.sort_col;
+    sort_col = rcmail.env[type + '_sort_col'];
   if (!sort_order)
-    sort_order = rcmail.env.sort_order;
+    sort_order = rcmail.env[type + '_sort_order'];
 
-  if (rcmail.env.sort_col != sort_col || rcmail.env.sort_order != sort_order) {
+  if (rcmail.env[type + '_sort_col'] != sort_col || rcmail.env[type + '_sort_order'] != sort_order) {
     update = 1;
-    rcmail.set_list_sorting(sort_col, sort_order);
+    // set table header class
+    kolab_files_set_list_sorting(sort_col, sort_order, type);
   }
 
   if (cols && cols.length) {
@@ -682,9 +985,10 @@ kolab_files_set_list_options = function(cols, sort_col, sort_order)
   }
 
   if (update == 1)
-    rcmail.command('files-list', {sort: sort_col, reverse: sort_order == 'DESC'});
+    rcmail.command(type + '-list', {sort: sort_col, reverse: sort_order == 'DESC'});
   else if (update) {
     rcmail.http_post('files/prefs', {
+      type: type,
       kolab_files_list_cols: oldcols,
       kolab_files_sort_col: sort_col,
       kolab_files_sort_order: sort_order
@@ -692,31 +996,69 @@ kolab_files_set_list_options = function(cols, sort_col, sort_order)
   }
 };
 
-kolab_files_set_coltypes = function(list)
+function kolab_files_set_list_sorting(sort_col, sort_order, type)
+{
+  // set table header class
+  var old_col = rcmail.env[type + '_sort_col'],
+    old_sort = rcmail.env[type + '_sort_order'];
+
+  $('#rcm' + old_col).removeClass('sortedASC sortedDESC');
+  $('#rcm' + sort_col).addClass('sorted' + sort_order);
+
+  rcmail.env[type + '_sort_col'] = sort_col;
+  rcmail.env[type + '_sort_order'] = sort_order;
+};
+
+function kolab_files_set_coltypes(list, type)
 {
   var i, found, name, cols = list.list.tHead.rows[0].cells;
 
-  rcmail.env.coltypes = [];
+  rcmail.env[type + '_coltypes'] = [];
 
   for (i=0; i<cols.length; i++)
     if (cols[i].id && cols[i].id.match(/^rcm/)) {
       name = cols[i].id.replace(/^rcm/, '');
-      rcmail.env.coltypes.push(name);
+      rcmail.env[type + '_coltypes'].push(name);
     }
 
-//  if ((found = $.inArray('name', rcmail.env.coltypes)) >= 0)
+//  if ((found = $.inArray('name', rcmail.env.files_coltypes)) >= 0)
 //    rcmail.env.subject_col = found;
   rcmail.env.subject_col = list.subject_col;
 
-  rcmail.http_post('files/prefs', {kolab_files_list_cols: rcmail.env.coltypes});
+  rcmail.http_post('files/prefs', {kolab_files_list_cols: rcmail.env[type + '_coltypes'], type: type});
 };
 
-kolab_files_list_dblclick = function(list)
+function kolab_files_sessions_list_dblclick(list)
+{
+  rcmail.command('sessions-open');
+};
+
+function kolab_files_sessions_list_select(list)
+{
+  var selected = list.selection.length;
+
+  rcmail.enable_command('sessions-open', selected == 1);
+};
+
+function kolab_files_sessions_list_keypress(list)
+{
+  if (list.modkey == CONTROL_KEY)
+    return;
+
+  if (list.key_pressed == list.ENTER_KEY) {
+    // use setTimeout(), otherwise the opened dialog will be immediately closed
+    setTimeout(function() { rcmail.command('sessions-open'); }, 50);
+  }
+//  else if (list.key_pressed == list.DELETE_KEY || list.key_pressed == list.BACKSPACE_KEY)
+//    rcmail.command('sessions-delete');
+};
+
+function kolab_files_list_dblclick(list)
 {
   rcmail.command('files-open');
 };
 
-kolab_files_list_select = function(list)
+function kolab_files_list_select(list)
 {
   var selected = list.selection.length;
 
@@ -727,27 +1069,25 @@ kolab_files_list_select = function(list)
 //  if (list.selection.length && list.selection.length != list.rowcount)
 //    rcmail.select_all_mode = false;
 
-  // enable files-
   if (selected == 1) {
     // get file mimetype
-    var type = $('tr.selected', list.list).data('type');
-    rcmail.env.viewer = file_api.file_type_supported(type);
+    var elem = $('tr.selected', list.list),
+      type = elem.data('type'),
+      folder = file_api.file_path(elem.data('file'));
+
+    rcmail.env.viewer = file_api.file_type_supported(type, rcmail.env.files_caps);
+
+    if (!file_api.is_writable(folder))
+      rcmail.enable_command('files-delete', 'files-rename', false);
   }
   else
     rcmail.env.viewer = 0;
-/*
-    ) {
-//      caps = this.browser_capabilities().join();
-      href = '?' + $.param({_task: 'files', _action: 'open', file: file, viewer: viewer == 2 ? 1 : 0});
-      var win = window.open(href, rcmail.html_identifier('rcubefile'+file));
-      if (win)
-        setTimeout(function() { win.focus(); }, 10);
-    }
-*/
+
+  rcmail.enable_command('files-edit', (rcmail.env.viewer & 4) == 4);
   rcmail.enable_command('files-open', rcmail.env.viewer);
 };
 
-kolab_files_list_keypress = function(list)
+function kolab_files_list_keypress(list)
 {
   if (list.modkey == CONTROL_KEY)
     return;
@@ -758,28 +1098,46 @@ kolab_files_list_keypress = function(list)
     rcmail.command('files-delete');
 };
 
-kolab_files_drag_end = function(e)
+function kolab_files_drag_start(e)
 {
-  var folder = $('#files-folder-list li.droptarget').removeClass('droptarget');
+  rcmail.env.drag_target = null;
 
-  if (folder.length) {
-    folder = folder.data('folder');
+  if (rcmail.folder_list)
+    rcmail.folder_list.drag_start();
+};
 
-    var modkey = rcube_event.get_modifier(e),
-      menu = rcmail.gui_objects.file_dragmenu;
+function kolab_files_drag_end(e)
+{
+  if (rcmail.folder_list) {
+    rcmail.folder_list.drag_end();
 
-    if (menu && modkey == SHIFT_KEY && rcmail.commands['files-copy']) {
-      var pos = rcube_event.get_mouse_pos(e);
-      rcmail.env.drag_target = folder;
-      $(menu).css({top: (pos.y-10)+'px', left: (pos.x-10)+'px'}).show();
-      return;
+    if (rcmail.env.drag_target) {
+      var modkey = rcube_event.get_modifier(e),
+        menu = rcmail.gui_objects.file_dragmenu;
+
+      rcmail.fileslist.draglayer.hide();
+
+      if (menu && modkey == SHIFT_KEY && rcmail.commands['files-copy']) {
+        var pos = rcube_event.get_mouse_pos(e);
+        $(menu).css({top: (pos.y-10)+'px', left: (pos.x-10)+'px'}).show();
+        return;
+      }
+
+      rcmail.command('files-move', rcmail.env.drag_target);
     }
-
-    rcmail.command('files-move', folder);
   }
 };
 
-kolab_files_drag_menu_action = function(command)
+function kolab_files_drag_move(e)
+{
+  if (rcmail.folder_list) {
+    var mouse = rcube_event.get_mouse_pos(e);
+
+    rcmail.env.drag_target = rcmail.folder_list.intersects(mouse, true);
+  }
+};
+
+function kolab_files_drag_menu_action(command)
 {
   var menu = rcmail.gui_objects.file_dragmenu;
 
@@ -789,10 +1147,10 @@ kolab_files_drag_menu_action = function(command)
   rcmail.command(command, rcmail.env.drag_target);
 };
 
-kolab_files_selected = function()
+function kolab_files_selected()
 {
   var files = [];
-  $.each(rcmail.file_list.get_selection(), function(i, v) {
+  $.each(rcmail.fileslist.get_selection(), function(i, v) {
     var name, row = $('#rcmrow'+v);
 
     if (row.length == 1 && (name = row.data('file')))
@@ -802,18 +1160,24 @@ kolab_files_selected = function()
   return files;
 };
 
-kolab_files_frame_load = function(frame)
+function kolab_files_frame_load(frame)
 {
-  var win = frame.contentWindow;
+  var win = frame.contentWindow,
+    info = rcmail.env.file_data;
 
-  rcmail.file_editor = win.file_editor && win.file_editor.editable ? win.file_editor : null;
+  try {
+    rcmail.file_editor = win.file_editor && win.file_editor.editable ? win.file_editor : null;
+  }
+  catch (e) {};
 
-  if (rcmail.file_editor)
-    rcmail.enable_command('files-edit', true);
+  // on edit page switch immediately to edit mode
+  if (rcmail.file_editor && rcmail.env.action == 'edit')
+    rcmail.files_edit();
 
-  rcmail.enable_command('files-print', (rcmail.file_editor && rcmail.file_editor.printable) ||
-    (rcmail.env.file_data && /^image\//i.test(rcmail.env.file_data.type)));
-
+  rcmail.enable_command('files-edit', rcmail.file_editor
+    || (info && info.viewer && info.viewer.manticore));
+  rcmail.enable_command('files-print', (rcmail.file_editor && rcmail.file_editor.printable)
+    || (info && /^image\//i.test(info.type)));
   // detect Print button and check if it can be accessed
   try {
     if ($('#fileframe').contents().find('#print').length)
@@ -823,7 +1187,7 @@ kolab_files_frame_load = function(frame)
 };
 
 // activate html5 file drop feature (if browser supports it)
-kolab_files_drag_drop_init = function(container)
+function kolab_files_drag_drop_init(container)
 {
   if (!window.FormData && !(window.XMLHttpRequest && XMLHttpRequest.prototype && XMLHttpRequest.prototype.sendAsBinary)) {
     return;
@@ -833,7 +1197,7 @@ kolab_files_drag_drop_init = function(container)
     return;
 
   $(document.body).bind('dragover dragleave drop', function(e) {
-    if (!file_api.env.folder)
+    if (!file_api.is_writable())
       return;
 
     e.preventDefault();
@@ -854,9 +1218,9 @@ kolab_files_drag_drop_init = function(container)
 };
 
 // handler for drag/drop on element
-kolab_files_drag_hover = function(e)
+function kolab_files_drag_hover(e)
 {
-  if (!file_api.env.folder)
+  if (!file_api.is_writable())
     return;
 
   e.preventDefault();
@@ -871,7 +1235,7 @@ kolab_files_drag_hover = function(e)
 };
 
 // returns localized file size
-kolab_files_file_size = function(size)
+function kolab_files_file_size(size)
 {
   var i, units = ['GB', 'MB', 'KB', 'B'];
 
@@ -884,7 +1248,7 @@ kolab_files_file_size = function(size)
   return size;
 };
 
-kolab_files_progress_str = function(param)
+function kolab_files_progress_str(param)
 {
   var current, total = file_api.file_size(param.total).toUpperCase();
 
@@ -906,28 +1270,366 @@ kolab_files_progress_str = function(param)
 };
 
 
+/**********************************************************/
+/*********    Manticore editor functionality     **********/
+/**********************************************************/
+
+// Initialize document toolbar functionality
+function manticore_init()
+{
+  var info = rcmail.env.file_data;
+
+  rcmail.enable_command('document-export', true);
+
+  if (info && info.session && info.session.is_owner)
+    rcmail.enable_command('document-close', 'document-editors', true);
+};
+
+// executed on editing session termination
+function manticore_close()
+{
+  $('<div>').addClass('popupdialog').attr('role', 'alertdialog')
+    .html($('<span>').text(rcmail.gettext('kolab_files.sessionterminated')))
+    .dialog({
+      resizable: false,
+      closeOnEscape: true,
+      dialogClass: 'popupmessage error',
+      title: rcmail.gettext('kolab_files.sessionterminatedtitle'),
+      close: function() { window.close(); },
+      position: ['center', 'center'],
+      width: 420,
+      minHeight: 90
+    }).show();
+
+  return false; // skip Chwala's error message
+};
+
+rcube_webmail.prototype.document_save = function()
+{
+  manticore.save(function(data) {
+    rcmail.enable_command('document-save', false);
+  });
+};
+
+rcube_webmail.prototype.document_export = function(type)
+{
+  manticore.export(type || 'odt');
+};
+
+rcube_webmail.prototype.document_editors = function()
+{
+  kolab_files_editors_dialog();
+};
+
+// close editing session
+rcube_webmail.prototype.document_close = function()
+{
+  // check document "unsaved changes" state and display a warning
+  if (this.commands['document-save'] && !confirm(this.gettext('kolab_files.unsavedchanges')))
+    return;
+
+  file_api.document_delete(this.env.file_data.session.id);
+};
+
+// document editors management dialog
+function kolab_files_editors_dialog(session)
+{
+  var items = [], buttons = {},
+    info = rcmail.env.file_data,
+    dialog = $('#document-editors-dialog'),
+    comment = $('#invitation-comment');
+
+  if (!info || !info.session || !info.session.is_owner)
+    return;
+
+  // always add the session organizer
+  items.push(kolab_files_attendee_record(info.session.owner, 'organizer'));
+
+  $.each(info.session.invitations || [], function(i, u) {
+    var record = kolab_files_attendee_record(u.user, u.status, u.user_name);
+    items.push(record);
+    info.session.invitations[i].record = record;
+  });
+
+  $('table > tbody', dialog).html(items);
+
+  buttons[rcmail.gettext('kolab_files.close')] = function() {
+    kolab_dialog_close(this);
+  };
+
+  // show dialog window
+  kolab_dialog_show(dialog, {
+    title: rcmail.gettext('kolab_files.manageeditors'),
+    buttons: buttons,
+    button_classes: ['mainaction']
+  });
+
+  if (!rcmail.env.editors_dialog) {
+    rcmail.env.editors_dialog = dialog;
+    rcmail.init_address_input_events($('#invitation-editor-name'), {action: 'files/autocomplete'});
+
+    rcmail.addEventListener('autocomplete_insert', function(e) {
+      var success = false;
+      if (e.field.name == 'participant') {
+        // e.data && e.data.type == 'group' ? 'GROUP' : 'INDIVIDUAL'
+        success = kolab_files_add_attendees(e.insert, comment.val());
+      }
+      if (e.field && success) {
+        e.field.value = '';
+      }
+    });
+
+    $('#invitation-editor-add').click(function() {
+      var input = $('#invitation-editor-name');
+      rcmail.ksearch_blur();
+      if (kolab_files_add_attendees(input.val(), comment.val())) {
+        input.val('');
+      }
+    });
+  }
+};
+
+// add the given list of participants
+function kolab_files_add_attendees(names, comment)
+{
+  var i, item, success, email, name, attendees = {}, counter = 0;
+
+  names = file_api.explode_quoted_string(names.replace(/,\s*$/, ''), ',');
+
+  // parse name/email pairs
+  for (i = 0; i < names.length; i++) {
+    email = name = '';
+    item = $.trim(names[i]);
+
+    if (!item.length) {
+      continue;
+    } // address in brackets without name (do nothing)
+    else if (item.match(/^<[^@]+@[^>]+>$/)) {
+      email = item.replace(/[<>]/g, '');
+    } // address without brackets and without name (add brackets)
+    else if (rcube_check_email(item)) {
+      email = item;
+    } // address with name
+    else if (item.match(/([^\s<@]+@[^>]+)>*$/)) {
+      email = RegExp.$1;
+      name = item.replace(email, '').replace(/^["\s<>]+/, '').replace(/["\s<>]+$/, '');
+    }
+
+    if (email) {
+      attendees[email] = {user: email, name: name};
+      counter++;
+    }
+    else {
+      alert(rcmail.gettext('noemailwarning'));
+    }
+  }
+
+  success = counter > 0;
+
+  // remove already existing entries
+  if (counter) {
+    if (attendees[rcmail.env.file_data.session.owner]) {
+      delete attendees[this.user];
+      counter--;
+    }
+    $.each(rcmail.env.file_data.session.invitations || [], function() {
+      if (this.user in attendees) {
+        delete attendees[this.user];
+        counter--;
+      }
+    });
+  }
+
+  if (counter)
+    file_api.document_invite(rcmail.env.file_data.session.id, attendees, comment);
+
+  return success;
+};
+
+function kolab_files_attendee_record(user, status, username)
+{
+  var options = [], select,
+    type = status ? status.replace(/-.*$/, '') : '',
+    name = $('<td class="name">').text(user),
+    buttons = $('<td class="options">'),
+    state = $('<td class="status">').text(rcmail.gettext('kolab_files.status' + type));
+
+  // @todo: accept/decline invitation request
+  if (type == 'requested' || status == 'accepted-owner' || status == 'declined-owner') {
+    select = $('<select>').change(function() {
+        var val = $(this).val(), map = {accepted: 'invitation_accept', declined: 'invitation_decline'};
+        if (map[val])
+          manticore[map[val]]({user: user, session_id: rcmail.env.file_data.session.id});
+      });
+
+    if (type == 'requested')
+      options.push($('<option>').text(rcmail.gettext('kolab_files.statusrequested')).attr('value', 'requested'));
+
+    options.push($('<option>').text(rcmail.gettext('kolab_files.statusaccepted')).attr('value', 'accepted'));
+    options.push($('<option>').text(rcmail.gettext('kolab_files.statusdeclined')).attr('value', 'declined'));
+
+    state.html(select.html(options).val(type));
+  }
+
+  // delete button
+  if (status != 'organizer') {
+    $('<a>').attr({'class': 'delete', href: '#', title: rcmail.gettext('kolab_files.removeparticipant')})
+      .click(function() {
+        file_api.document_cancel(rcmail.env.file_data.session.id, [user]);
+      })
+      .appendTo(buttons);
+  }
+
+  if (username && status != 'organizer')
+    name.html($('<a>').attr({href: 'mailto:' + user, 'class': 'mailtolink'}).text(username))
+      .click(function(e) { rcmail.command('compose', user, e.target, e); return false; });
+
+  return $('<tr>').attr('class', 'invitation' + (type ? ' ' + type : ''))
+      .append(name).append(state).append(buttons);
+};
+
+function manticore_invitation_handler(invitation)
+{
+  // make the "More" link clickable
+  $('#' + invitation.id).parent('div').click(function() { kolab_files_invitation_dialog(invitation); });
+};
+
+function kolab_files_invitation_dialog(invitation)
+{
+  var text, records = [], content = [], buttons = {},
+    dialog = $('#document-invitation-dialog'),
+    data_map = {status: 'status', 'changed': 'when', filename: 'file', comment: 'comment'},
+    record_fn = function(type, label, value) {
+        records.push($('<tr>').attr('class', type)
+          .append($('<td class="label">').text(rcmail.gettext('kolab_files.'+ label)))
+          .append($('<td>').text(value))
+        );
+      };
+    join_session = function() {
+        var viewer = file_api.file_type_supported('application/vnd.oasis.opendocument.text', rcmail.env.files_caps);
+          params = {action: 'edit', session: invitation.session_id};
+
+        file_api.file_open('', viewer, params);
+      };
+
+  if (!dialog.length)
+    dialog = $('<div>').attr({id: 'document-invitation-dialog', role: 'dialog', 'aria-hidden': 'true'})
+      .append($('<div>'))
+      .appendTo(document.body);
+
+  if (!invitation.is_session_owner) {
+    if (invitation.status == 'invited') {
+      text = manticore.invitation_msg(invitation);
+
+      buttons[rcmail.gettext('kolab_files.join')] = function() {
+        join_session();
+        kolab_dialog_close(this);
+      };
+      buttons[rcmail.gettext('kolab_files.accept')] = function() {
+        manticore.invitation_accept(invitation);
+        kolab_dialog_close(this);
+      };
+      buttons[rcmail.gettext('kolab_files.decline')] = function() {
+        manticore.invitation_decline(invitation);
+        kolab_dialog_close(this);
+      };
+    }
+    else if (invitation.status == 'declined-owner') {
+      // @todo: add option to request for an invitation again?
+      text = manticore.invitation_msg(invitation);
+    }
+    else if (invitation.status == 'accepted-owner') {
+      text = manticore.invitation_msg(invitation);
+
+      buttons[rcmail.gettext('kolab_files.join')] = function() {
+        join_session();
+        kolab_dialog_close(this);
+      };
+    }
+  }
+  else {
+    if (invitation.status == 'accepted') {
+      text = manticore.invitation_msg(invitation);
+    }
+    else if (invitation.status == 'declined') {
+      // @todo: add option to invite the user again?
+      text = manticore.invitation_msg(invitation);
+    }
+    else if (invitation.status == 'requested') {
+      text = manticore.invitation_msg(invitation);
+
+      buttons[rcmail.gettext('kolab_files.accept')] = function() {
+        manticore.invitation_accept(invitation);
+        kolab_dialog_close(this);
+      };
+      buttons[rcmail.gettext('kolab_files.decline')] = function() {
+        manticore.invitation_decline(invitation);
+        kolab_dialog_close(this);
+      };
+    }
+  }
+
+  if (text) {
+    $.each(data_map, function(i, label) {
+      var value = invitation[i];
+      if (value) {
+        if (i == 'status')
+          value = rcmail.gettext('kolab_files.status' + value.replace(/-.*$/, ''));
+
+        record_fn(i, label, value);
+      }
+    });
+
+    content.push($('<div>').text(text));
+    content.push($('<table class="propform">').html(records));
+  }
+
+  buttons[rcmail.gettext('kolab_files.close')] = function() {
+    kolab_dialog_close(this);
+  };
+
+  $('div', dialog).html(content);
+
+  // show dialog window
+  kolab_dialog_show(dialog, {
+    title: rcmail.gettext('kolab_files.invitationtitle').replace('$file', invitation.filename),
+    buttons: buttons
+  });
+};
+
 /***********************************************************/
 /**********              Commands                 **********/
 /***********************************************************/
 
 rcube_webmail.prototype.files_sort = function(props)
 {
-  var params = {},
-    sort_order = this.env.sort_order,
-    sort_col = !this.env.disabled_sort_col ? props : this.env.sort_col;
+  this.files_sort_handler(props, 'files');
+};
 
-  if (!this.env.disabled_sort_order)
-    sort_order = this.env.sort_col == sort_col && sort_order == 'ASC' ? 'DESC' : 'ASC';
+rcube_webmail.prototype.sessions_sort = function(props)
+{
+  this.files_sort_handler(props, 'sessions');
+};
+
+rcube_webmail.prototype.files_sort_handler = function(col, type)
+{
+  var params = {},
+    c = type == 'files' ? '' : ('_' + type),
+    sort_order = this.env[type + '_sort_order'],
+    sort_col = !this.env['kolab_files' + c + '_disabled_sort_col'] ? col : this.env[type + '_sort_col'];
+
+  if (!this.env['kolab_files' + c + '_disabled_sort_order'])
+    sort_order = this.env[type + '_sort_col'] == sort_col && sort_order == 'ASC' ? 'DESC' : 'ASC';
 
   // set table header and update env
-  this.set_list_sorting(sort_col, sort_order);
+  kolab_files_set_list_sorting(sort_col, sort_order, type);
 
-  this.http_post('files/prefs', {kolab_files_sort_col: sort_col, kolab_files_sort_order: sort_order});
+  this.http_post('files/prefs', {kolab_files_sort_col: sort_col, kolab_files_sort_order: sort_order, type: type});
 
   params.sort = sort_col;
   params.reverse = sort_order == 'DESC';
 
-  this.command('files-list', params);
+  this.command(type + '-list', params);
 };
 
 rcube_webmail.prototype.files_search = function()
@@ -988,12 +1690,26 @@ rcube_webmail.prototype.files_list = function(param)
 
 rcube_webmail.prototype.files_list_update = function(head)
 {
-  var list = this.file_list;
+  var list = this.fileslist;
 
-  list.clear();
   $('thead', list.fixed_header ? list.fixed_header : list.list).html(head);
   kolab_files_list_coltypes();
   file_api.file_list();
+};
+
+rcube_webmail.prototype.sessions_list = function(param)
+{
+  // just rcmail wrapper, to handle command busy states
+  file_api.session_list(param);
+}
+
+rcube_webmail.prototype.sessions_list_update = function(head)
+{
+  var list = this.sessionslist;
+
+  $('thead', list.fixed_header ? list.fixed_header : list.list).html(head);
+  kolab_files_list_coltypes('sessions');
+  file_api.sessions_list();
 };
 
 rcube_webmail.prototype.files_get = function()
@@ -1013,14 +1729,48 @@ rcube_webmail.prototype.files_open = function()
 };
 
 // enable file editor
-rcube_webmail.prototype.files_edit = function()
+rcube_webmail.prototype.files_edit = function(session)
 {
-  if (this.file_editor) {
+  var files, readonly, sessions, file = this.env.file,
+    params = {action: 'edit'};
+
+  if (!file && !this.env.action) {
+    files = kolab_files_selected();
+    if (files.length == 1)
+      file = files[0];
+    readonly = !file_api.is_writable(file_api.file_path(file));
+  }
+  else {
+    readonly = !this.env.file_data.writable;
+  }
+
+  // check if the folder is read-only or there are ongoing sessions
+  // in such cases display dialog for the user to decide what to do
+  if (!session) {
+    sessions = file_api.file_sessions(file);
+    if (sessions.length || readonly) {
+      kolab_files_file_edit_dialog(file, sessions, readonly);
+      return;
+    }
+  }
+  else if (session !== true)
+    params.session = session;
+
+  if (this.file_editor && !session) {
     this.file_editor.enable();
     this.enable_command('files-save', true);
   }
+  else if (this.env.file) {
+    var viewer = file_api.file_type_supported(this.env.file_data.type, this.env.files_caps);
+    params.local = true;
+    file_api.file_open(file, viewer, params);
+  }
+  else if (file) {
+    file_api.file_open(file, this.env.viewer, params);
+  }
 };
 
+// save changes to the file
 rcube_webmail.prototype.files_save = function()
 {
   if (!this.file_editor)
@@ -1087,6 +1837,17 @@ rcube_webmail.prototype.files_set_quota = function(p)
   this.set_quota(p);
 };
 
+rcube_webmail.prototype.files_create = function()
+{
+  kolab_files_file_create_dialog();
+};
+
+rcube_webmail.prototype.files_rename = function()
+{
+  var files = kolab_files_selected();
+  kolab_files_file_rename_dialog(files[0]);
+};
+
 rcube_webmail.prototype.folder_create = function()
 {
   kolab_files_folder_create_dialog();
@@ -1102,6 +1863,16 @@ rcube_webmail.prototype.folder_mount = function()
   kolab_files_folder_mount_dialog();
 };
 
+// open a session dialog
+rcube_webmail.prototype.sessions_open = function()
+{
+  var id = this.sessionslist.get_selection(),
+    session = id ? file_api.env.sessions_list[id] : null;
+
+  if (session)
+    kolab_files_session_dialog(session);
+};
+
 
 /**********************************************************/
 /*********          Files API handler            **********/
@@ -1111,6 +1882,7 @@ function kolab_files_ui()
 {
   this.requests = {};
   this.uploads = [];
+  this.workers = {};
 
 /*
   // Called on "session expired" session
@@ -1140,143 +1912,553 @@ function kolab_files_ui()
     return rcmail.display_message(this.t(label), type);
   };
 
-  this.http_error = function(request, status, err)
+  this.http_error = function(request, status, err, data)
   {
-    rcmail.http_error(request, status, err);
+    rcmail.http_error(request, status, err, data ? data.req_id : null);
+  };
+
+  // check if specified/current folder/view is writable
+  this.is_writable = function(folder)
+  {
+    if (!folder)
+      folder = this.env.folder;
+
+    if (!folder)
+      return false;
+
+    var all_folders = $.extend({}, this.env.folders, this.search_results);
+
+    if (!all_folders[folder] || all_folders[folder].readonly || all_folders[folder].virtual)
+      return false;
+
+    return true;
   };
 
   // folders list request
-  this.folder_list = function()
+  this.folder_list = function(params)
   {
-    this.req = this.set_busy(true, 'loading');
-    this.request('folder_list', {}, 'folder_list_response');
+    if (!params)
+      params = {}
+
+    params.permissions = 1;
+    params.req = this.set_busy(true, 'loading');
+
+    this.request('folder_list', this.list_params = params, 'folder_list_response');
   };
 
   // folder list response handler
   this.folder_list_response = function(response)
   {
+    rcmail.hide_message(this.list_params.req);
+
     if (!this.response(response))
       return;
 
-    var first, elem = $('#files-folder-list'),
-      list = $('<ul class="listing"></ul>'),
-      collections = !rcmail.env.action.match(/^(preview|show)$/) ? ['audio', 'video', 'image', 'document'] : [];
+    var first, body, rows = [],
+      list_selector = rcmail.env.folder_list_selector || '#files-folder-list',
+      search_selector = rcmail.env.folder_search_selector || '#foldersearch',
+      elem = $(list_selector),
+      searchbox = $(search_selector),
+      list = $('<ul class="treelist listing folderlist"></ul>'),
+      collections = ['audio', 'video', 'image', 'document'];
 
     // try parent window if the list element does not exist
     // i.e. called from dialog in parent window
     if (!elem.length && window.parent && parent.rcmail) {
-      elem = $('#files-folder-list', window.parent.document.body);
+      body = window.parent.document.body;
+      elem = $(list_selector, body);
+      searchbox = $(search_selector, body);
     }
 
-    elem.html('').append(list);
+    if (elem.data('no-collections') == true)
+      collections = [];
+
+    elem.html('');
 
     this.env.folders = this.folder_list_parse(response.result && response.result.list ? response.result.list : response.result);
 
     $.each(this.env.folders, function(i, f) {
-      list.append(file_api.folder_list_row(i, f));
-      if (!first)
-        first = i;
+      var row;
+      if (row = file_api.folder_list_row(i, f)) {
+        if (!first)
+          first = i;
+        rows.push(row);
+      }
     });
 
     // add virtual collections
     $.each(collections, function(i, n) {
       var row = $('<li class="mailbox collection ' + n + '"></li>');
 
-      row.attr({id: 'folder-collection-' + n, tabindex: 0})
-        .append($('<span class="name"></span>').text(rcmail.gettext('kolab_files.collection_' + n)))
-        .click(function() { file_api.folder_select(n, true); });
+      row.attr('id', 'rcmli' + rcmail.html_identifier_encode('folder-collection-' + n))
+        .append($('<a class="name"></a>').text(rcmail.gettext('kolab_files.collection_' + n)))
 
-      list.append(row);
+      rows.push(row);
     });
 
+    // add Sessions entry
+    if (rcmail.task == 'files' && !rcmail.env.action && rcmail.env.files_caps && rcmail.env.files_caps.MANTICORE) {
+      rows.push($('<li class="mailbox collection sessions"></li>')
+        .attr('id', 'rcmli' + rcmail.html_identifier_encode('folder-collection-sessions'))
+        .append($('<a class="name"></a>').text(rcmail.gettext('kolab_files.sessions')))
+      );
+    }
+
+    list.append(rows).appendTo(elem)
+      .on('click', 'a.subscription', function(e) {
+        return file_api.folder_list_subscription_button_click(this);
+      });
+
+    if (rcmail.folder_list) {
+      rcmail.folder_list.reset();
+      this.search_results_widget = null;
+    }
+
+    // init treelist widget
+    rcmail.folder_list = new rcube_treelist_widget(list, {
+        selectable: true,
+        id_prefix: 'rcmli',
+        parent_focus: true,
+        searchbox: searchbox,
+        id_encode: rcmail.html_identifier_encode,
+        id_decode: rcmail.html_identifier_decode,
+        check_droptarget: function(node) {
+          return !node.virtual
+            && node.id != file_api.env.folder
+            && $.inArray('readonly', node.classes) == -1
+            && $.inArray('collection', node.classes) == -1;
+        }
+    });
+
+    rcmail.folder_list
+      .addEventListener('collapse', function(node) { file_api.folder_collapsed(node); })
+      .addEventListener('expand', function(node) { file_api.folder_collapsed(node); })
+      .addEventListener('beforeselect', function(node) { return !rcmail.busy; })
+      .addEventListener('search', function(search) { file_api.folder_search(search); })
+      .addEventListener('select', function(node) {
+        if (file_api.search_results_widget)
+          file_api.search_results_widget.select();
+        file_api.folder_select(node.id);
+      });
+
     // select first folder?
-    if (this.env.folder)
-      this.folder_select(this.env.folder);
+    if (response.result.auth_errors) { }
+    else if (this.env.folder)
+      rcmail.folder_list.select(this.env.folder);
     else if (this.env.collection)
-      this.folder_select(this.env.collection, true);
+      rcmail.folder_list.select('folder-collection-' + this.env.collection);
     else if (first)
-      this.folder_select(first);
+      rcmail.folder_list.select(first);
+
+    rcmail.enable_command('files-create', true);
 
     // add tree icons
-    this.folder_list_tree(this.env.folders);
+//    this.folder_list_tree(this.env.folders);
 
     // handle authentication errors on external sources
-    this.folder_list_auth_errors(response.result);
+    if (elem.length)
+      this.folder_list_auth_errors(response.result);
   };
 
-  this.folder_select = function(folder, is_collection)
+  this.folder_select = function(folder)
   {
     if (rcmail.busy)
       return;
 
-    var list = $('#files-folder-list > ul');
+    var is_collection = folder.match(/^folder-collection-(.*)$/),
+      collection = RegExp.$1 || null;
 
-    // try parent window if the list element does not exist
-    // i.e. called from dialog in parent window
-    if (!list.length && window.parent && parent.rcmail) {
-      list = $('#files-folder-list > ul', window.parent.document.body);
+    if (collection == 'sessions') {
+      rcmail.enable_command('files-list', 'files-folder-delete', 'folder-rename', 'files-upload', false);
+      this.sessions_list();
+      return;
     }
 
-    $('li.selected', list).removeClass('selected');
+    if (is_collection)
+      folder = null;
+
+    // search-reset can re-select the same folder, skip
+    if (this.env.folder == folder && this.env.collection == collection)
+      return;
+
+    this.env.folder = folder;
+    this.env.collection = collection;
 
     rcmail.enable_command('files-list', true);
-
-    if (is_collection) {
-      var found = $('#folder-collection-' + folder, list).addClass('selected');
-
-      rcmail.enable_command('files-folder-delete', 'folder-rename', 'files-upload', false);
-      this.env.folder = null;
-      rcmail.command('files-list', {collection: folder});
-    }
-    else {
-      var found = $('#' + this.env.folders[folder].id, list).addClass('selected');
-
-      rcmail.enable_command('files-folder-delete', 'folder-rename', 'files-upload', true);
-      this.env.folder = folder;
-      this.env.collection = null;
-      rcmail.command('files-list', {folder: folder});
-    }
+    rcmail.enable_command('files-folder-delete', 'folder-rename', !is_collection);
+    rcmail.enable_command('files-upload', !is_collection && this.is_writable());
+    rcmail.command('files-list', is_collection ? {collection: collection} : {folder: folder});
 
     this.quota();
   };
 
   this.folder_unselect = function()
   {
-    var list = $('#files-folder-list > ul');
-    $('li.selected', list).removeClass('selected');
-    rcmail.enable_command('files-folder-delete', 'files-upload', false);
+    rcmail.folder_list.select();
     this.env.folder = null;
     this.env.collection = null;
+    rcmail.enable_command('files-folder-delete', 'files-upload', false);
   };
 
-  this.folder_list_row = function(i, folder)
+  this.folder_collapsed = function(node)
   {
-    var row = $('<li class="mailbox"><span class="branch"></span></li>');
+    var prefname = 'kolab_files_collapsed_folders',
+      old = rcmail.env[prefname],
+      entry = '&' + urlencode(node.id) + '&';
 
-    row.attr('id', folder.id).data('folder', i)
-      .append($('<span class="name"></span>').text(folder.name));
+    if (node.collapsed) {
+      rcmail.env[prefname] = rcmail.env[prefname] + entry;
 
-    if (folder.depth) {
-      $('span.branch', row).width(15 * folder.depth);
-      row.addClass('child');
+      // select the folder if one of its childs is currently selected
+      // don't select if it's virtual (#1488346)
+      if (!node.virtual && this.env.folder && this.env.folder.startsWith(node.id + '/')) {
+        rcmail.folder_list.select(node.id);
+      }
+    }
+    else {
+      rcmail.env[prefname] = rcmail.env[prefname].replace(entry, '');
     }
 
+    if (old !== rcmail.env[prefname] && (!rcmail.fileslist || !rcmail.fileslist.drag_active))
+      rcmail.command('save-pref', {name: prefname, value: rcmail.env[prefname]});
+  };
+
+  this.folder_list_row = function(i, folder, parent)
+  {
+    var toggle, sublist, collapsed, parent, parent_name, classes = ['mailbox'],
+      row = $('<li>'),
+      id = 'rcmli' + rcmail.html_identifier_encode(i);
+
+    row.attr('id', id).append($('<a class="name">').text(folder.name));
+
     if (folder.virtual)
-      row.addClass('virtual');
-    else
-      row.attr('tabindex', 0)
-        .keypress(function(e) { if (e.which == 13 || e.which == 32) file_api.folder_select(i); })
-        .click(function() { file_api.folder_select(i); })
-        .mouseenter(function() {
-          if (rcmail.file_list && rcmail.file_list.drag_active && !$(this).hasClass('selected'))
-            $(this).addClass('droptarget');
-        })
-        .mouseleave(function() {
-          if (rcmail.file_list && rcmail.file_list.drag_active)
-            $(this).removeClass('droptarget');
+      classes.push('virtual');
+    else {
+      if (folder.subscribed !== undefined)
+        row.append(this.folder_list_subscription_button(folder.subscribed));
+
+      if (folder.readonly)
+        classes.push('readonly');
+    }
+
+    row.addClass(classes.join(' '));
+
+    folder.ref = row;
+
+    if (folder.depth) {
+      // find parent folder
+      parent_name = i.replace(/\/[^/]+$/, '');
+      if (!parent)
+        parent = $(this.env.folders[parent_name].ref);
+
+      toggle = $('div.treetoggle', parent);
+      sublist = $('> ul', parent);
+
+      if (!toggle.length) {
+        collapsed = rcmail.env.kolab_files_collapsed_folders.indexOf('&' + urlencode(parent_name) + '&') > -1;
+
+        toggle = $('<div>').attr('class', 'treetoggle' + (collapsed ? ' collapsed' : ' expanded'))
+          .html('&nbsp;').appendTo(parent);
+
+        sublist = $('<ul>').attr({role: 'group'}).appendTo(parent);
+        if (collapsed)
+          sublist.hide();
+      }
+
+      sublist.append(row);
+    }
+    else {
+      return row;
+    }
+  };
+
+  // create subscription button element
+  this.folder_list_subscription_button = function(subscribed)
+  {
+    return $('<a>').attr({
+        title: rcmail.gettext('kolab_files.listpermanent'),
+        'class': 'subscription' + (subscribed ? ' subscribed' : ''),
+        'aria-checked': subscribed,
+        role: 'checkbox'
+    });
+  };
+
+  // subscription button handler
+  this.folder_list_subscription_button_click = function(elem)
+  {
+    var folder = $(elem).parent('li').prop('id').replace(/^rcmli/, ''),
+      selected = $(elem).hasClass('subscribed');
+
+    folder = folder.replace(/--xsR$/, ''); // this might be a search result
+    folder = rcmail.html_identifier_decode(folder);
+    file_api['folder_' + (selected ? 'unsubscribe' : 'subscribe')](folder);
+    return false;
+  };
+
+  // sets subscription button status
+  this.folder_list_subscription_state = function(elem, status)
+  {
+    $(elem).children('a.subscription')
+      .prop('aria-checked', status)[status ? 'addClass' : 'removeClass']('subscribed');
+  };
+
+  // Folder searching handler (for unsubscribed folders)
+  this.folder_search = function(search)
+  {
+    // hide search results
+    if (this.search_results_widget) {
+      this.search_results_container.hide();
+      this.search_results_widget.reset();
+    }
+    this.search_results = {};
+
+    // send search request to the server
+    if (search.query && search.execute) {
+      // cancel previous search request
+      if (this.listsearch_request) {
+        this.listsearch_request.abort();
+        this.listsearch_request = null;
+      }
+
+      var params = $.extend({search: search.query, unsubscribed: 1}, this.list_params);
+
+      this.req = this.set_busy(true, rcmail.gettext('searching'));
+      this.listsearch_request = this.request('folder_list', params, 'folder_search_response');
+    }
+    else if (!search.query) {
+      if (this.listsearch_request) {
+        this.listsearch_request.abort();
+        this.listsearch_request = null;
+      }
+
+      // any subscription changed, make sure the newly added records
+      // are listed before collections not after
+      if (this.folder_subscribe) {
+        var r, last, move = [], rows = $(rcmail.folder_list.container).children('li');
+
+        if (rows.length && !$(rows[rows.length-1]).hasClass('collection')) {
+          // collect all folders to move
+          while (rows.length--) {
+            r = $(rows[rows.length]);
+            if (r.hasClass('collection'))
+              last = r;
+            else if (last)
+              break;
+            else
+              move.push(r);
+          }
+
+          if (last)
+            $.each(move, function() {
+              this.remove();
+              last.before(this);
+            });
+        }
+      }
+    }
+  };
+
+  // folder search response handler
+  this.folder_search_response = function(response)
+  {
+    if (!this.response(response))
+      return;
+
+    var folders = response.result && response.result.list ? response.result.list : response.result;
+
+    if (!folders.length)
+      return;
+
+    folders = this.folder_list_parse(folders, 10000, false);
+
+    if (!this.search_results_widget) {
+      var list = rcmail.folder_list.container,
+        title = rcmail.gettext('kolab_files.additionalfolders'),
+        list_id = list.attr('id') || '0';
+
+      this.search_results_container = $('<div class="searchresults"></div>')
+          .append($('<h2 class="boxtitle" id="st:' + list_id + '"></h2>').text(title))
+          .insertAfter(list);
+
+      this.search_results_widget = new rcube_treelist_widget('<ul>', {
+          id_prefix: 'rcmli',
+          id_encode: rcmail.html_identifier_encode,
+          id_decode: rcmail.html_identifier_decode,
+          selectable: true
+      });
+
+      this.search_results_widget
+        .addEventListener('beforeselect', function(node) { return !rcmail.busy; })
+        .addEventListener('select', function(node) {
+          rcmail.folder_list.select();
+          file_api.folder_select(node.id);
         });
 
-    return row;
+      this.search_results_widget.container
+        // copy classes from main list
+        .addClass(list.attr('class')).attr('aria-labelledby', 'st:' + list_id)
+        .appendTo(this.search_results_container)
+        .on('click', 'a.subscription', function(e) {
+          return file_api.folder_list_subscription_button_click(this);
+        });
+    }
+
+    // add results to the list
+    $.each(folders, function(i, folder) {
+      var node, separator = file_api.env.directory_separator,
+        path = i.split(separator),
+        classes = ['mailbox'],
+        html = [$('<a>').text(folder.name)];
+
+      if (!folder.virtual) {
+        // add subscription button
+        html.push(file_api.folder_list_subscription_button(false));
+
+        if (folder.readonly)
+          classes.push('readonly');
+      }
+
+      path.pop();
+
+      file_api.search_results_widget.insert({
+          id: i,
+          classes: classes,
+          text: folder.name,
+          html: html,
+          collapsed: false,
+          virtual: folder.virtual
+        }, path.length ? path.join(separator) : null);
+    });
+
+    this.search_results = folders;
+    this.search_results_container.show();
+  };
+
+  // folder subscribe request
+  this.folder_subscribe = function(folder)
+  {
+    this.env.folder_subscribe = folder;
+    this.req = this.set_busy(true, 'foldersubscribing');
+    this.request('folder_subscribe', {folder: folder}, 'folder_subscribe_response');
+  }
+
+  // folder subscribe response handler
+  this.folder_subscribe_response = function(response)
+  {
+    if (!this.response(response))
+      return;
+
+    this.display_message('foldersubscribed', 'confirmation');
+
+    var item, node = rcmail.folder_list.get_item(this.env.folder_subscribe);
+
+    if (this.search_results && this.search_results[this.env.folder_subscribe]) {
+      item = this.search_results_widget.get_item(this.env.folder_subscribe);
+      this.folder_list_subscription_state(item, true);
+      if (item = $(item).attr('id'))
+        this.folder_list_subscription_state($('#' + item.replace(/--xsR$/, '')), true);
+    }
+
+    // search result, move from search to main list widget
+    if (!node && this.search_results && this.search_results[this.env.folder_subscribe]) {
+      var i, html, dir, folder, separator = this.env.directory_separator,
+        path = this.env.folder_subscribe.split(separator);
+
+      // add all folders in a path to the main list if needed
+      // including the subscribed folder
+      for (i=0; i<path.length; i++) {
+        dir = path.slice(0, i + 1).join(separator);
+        node = rcmail.folder_list.get_node(dir);
+
+        if (!node) {
+          node = this.search_results_widget.get_node(dir);
+          if (!node) {
+            // sanity check
+            return;
+          }
+
+          if (i == path.length - 1) {
+            item = this.search_results_widget.get_item(dir);
+            this.folder_list_subscription_state(item, true);
+          }
+
+          folder = this.search_results[dir];
+          html = [$('<a>').text(folder.name)];
+          if (!folder.virtual)
+            html.push(this.folder_list_subscription_button(true));
+
+          node.html = html;
+          delete node.children;
+
+          rcmail.folder_list.insert(node, i > 0 ? path.slice(0, i).join(separator) : null);
+          // we're in search result, so there will be two records,
+          // add subscription button to the visible one, it was not cloned
+          if (!folder.virtual) {
+            node = rcmail.folder_list.get_item(dir);
+            $(node).append(file_api.folder_list_subscription_button(true));
+          }
+
+          this.env.folders[dir] = folder;
+        }
+      }
+
+      // now remove them from the search widget
+      while (path.length) {
+        dir = path.join(separator);
+        node = this.search_results_widget.get_item(dir);
+
+        if ($('ul[role="group"] > li', node).length)
+          break;
+
+        this.search_results_widget.remove(dir);
+
+        path.pop();
+      }
+
+      node = null;
+    }
+
+    if (node)
+      this.folder_list_subscription_state(node, true);
+
+    this.env.folders[this.env.folder_subscribe].subscribed = true;
+  };
+
+  // folder unsubscribe request
+  this.folder_unsubscribe = function(folder)
+  {
+    this.env.folder_subscribe = folder;
+    this.req = this.set_busy(true, 'folderunsubscribing');
+    this.request('folder_unsubscribe', {folder: folder}, 'folder_unsubscribe_response');
+  }
+
+  // folder unsubscribe response handler
+  this.folder_unsubscribe_response = function(response)
+  {
+    if (!this.response(response))
+      return;
+
+    this.display_message('folderunsubscribed', 'confirmation');
+
+    var folder = this.env.folders[this.env.folder_subscribe],
+      node = rcmail.folder_list.get_item(this.env.folder_subscribe);
+
+    if (this.search_results && this.search_results[this.env.folder_subscribe]) {
+      item = this.search_results_widget.get_item(this.env.folder_subscribe);
+
+      if (item) {
+        this.folder_list_subscription_state(item, false);
+        item = $('#' + $(item).attr('id').replace(/--xsR$/, ''));
+      }
+      else
+        item = $('#rcmli' + rcmail.html_identifier_encode(this.env.folder_subscribe), rcmail.folder_list.container);
+
+      this.folder_list_subscription_state(item, false);
+    }
+
+    this.folder_list_subscription_state(node, false);
+
+    folder.subscribed = false;
   };
 
   // folder create request
@@ -1379,20 +2561,76 @@ function kolab_files_ui()
     rcmail.files_set_quota(response.result);
   };
 
+  // List of sessions
+  this.sessions_list = function(params)
+  {
+    if (!rcmail.gui_objects.sessionslist)
+      return;
+
+    if (!params)
+      params = {};
+
+    if (rcmail.gui_objects.fileslist) {
+      $(rcmail.gui_objects.fileslist).parent().hide();
+      $(rcmail.gui_objects.sessionslist).parent().show();
+      rcmail.fileslist.clear();
+    }
+
+    this.env.folder = null;
+    this.env.collection = null;
+
+    // empty the list
+    this.env.sessions_list = {};
+    rcmail.sessionslist.clear(true);
+
+    rcmail.enable_command(rcmail.env.file_commands, false);
+    rcmail.enable_command(rcmail.env.file_commands_all, false);
+
+    params.req_id = this.set_busy(true, 'loading');
+    this.requests[params.req_id] = this.request('sessions', params, 'sessions_list_response');
+  };
+
+  // file list response handler
+  this.sessions_list_response = function(response)
+  {
+    if (response.req_id)
+      rcmail.hide_message(response.req_id);
+
+    if (!this.response(response))
+      return;
+
+    $.each(response.result, function(sess_id, data) {
+      var row = file_api.session_list_row(sess_id, data);
+      rcmail.sessionslist.insert_row(row);
+      response.result[sess_id].row = row;
+    });
+
+    this.env.sessions_list = response.result;
+    rcmail.sessionslist.resize();
+  };
+
+  // Files list
   this.file_list = function(params)
   {
-    if (!rcmail.gui_objects.filelist)
+    if (!rcmail.gui_objects.fileslist)
       return;
 
     if (!params)
       params = {};
 
     // reset all pending list requests
-    for (i in this.requests) {
-      this.requests[i].abort();
+    $.each(this.requests, function(i, v) {
+      v.abort();
       rcmail.hide_message(i);
-      delete this.requests[i];
-    }
+    });
+
+    // reset folder_info workers
+    $.each(this.workers, function(i, v) {
+      clearTimeout(v);
+    });
+
+    this.workers = {};
+    this.requests = {};
 
     if (params.all_folders) {
       params.collection = null;
@@ -1405,23 +2643,29 @@ function kolab_files_ui()
     if (params.folder == undefined)
       params.folder = this.env.folder;
     if (params.sort == undefined)
-      params.sort = this.env.sort_col;
+      params.sort = this.env.files_sort_col;
     if (params.reverse == undefined)
-      params.reverse = this.env.sort_reverse;
+      params.reverse = this.env.files_sort_reverse;
     if (params.search == undefined)
       params.search = this.env.search;
 
     this.env.folder = params.folder;
     this.env.collection = params.collection;
-    this.env.sort_col = params.sort;
-    this.env.sort_reverse = params.reverse;
+    this.env.files_sort_col = params.sort;
+    this.env.files_sort_reverse = params.reverse;
 
     rcmail.enable_command(rcmail.env.file_commands, false);
     rcmail.enable_command(rcmail.env.file_commands_all, false);
 
+    if (rcmail.gui_objects.sessionslist) {
+      $(rcmail.gui_objects.sessionslist).parent().hide();
+      $(rcmail.gui_objects.fileslist).parent().show();
+      rcmail.sessionslist.clear(true)
+    }
+
     // empty the list
     this.env.file_list = [];
-    rcmail.file_list.clear(true);
+    rcmail.fileslist.clear(true);
 
     // request
     if (params.collection || params.all_folders)
@@ -1441,18 +2685,22 @@ function kolab_files_ui()
     if (!this.response(response))
       return;
 
-    var i = 0, list = [], table = $('#filelist');
+    var i = 0, list = [];
 
     $.each(response.result, function(key, data) {
       var row = file_api.file_list_row(key, data, ++i);
-      rcmail.file_list.insert_row(row);
+      rcmail.fileslist.insert_row(row);
       data.row = row;
       data.filename = key;
       list.push(data);
     });
 
     this.env.file_list = list;
-    rcmail.file_list.resize();
+    rcmail.fileslist.resize();
+
+    // update document sessions info of this folder
+    if (list && list.length)
+      this.request('folder_info', {folder: this.file_path(list[0].filename), sessions: 1}, 'folder_info_response');
   };
 
   // call file_list request for every folder (used for search and virt. collections)
@@ -1502,7 +2750,7 @@ function kolab_files_ui()
       this.requests[params.req_id] = this.request('file_list', params, 'file_list_loop_response');
     }
 
-    rcmail.file_list.resize();
+    rcmail.fileslist.resize();
 
     if (!valid)
       return;
@@ -1525,9 +2773,9 @@ function kolab_files_ui()
     // lock table, other list responses will wait
     this.env.folders_loop_lock = true;
 
-    var n, i, len, elem, list = [], rows = [],
+    var n, i, len, elem, row, folder, list = [],
       index = this.env.file_list.length,
-      table = rcmail.file_list;
+      table = rcmail.fileslist;
 
     for (n=0, len=index; n<len; n++) {
       elem = this.env.file_list[n];
@@ -1535,11 +2783,15 @@ function kolab_files_ui()
         if (this.sort_compare(elem, result[i]) < 0)
           break;
 
-        var row = this.file_list_row(i, result[i], ++index);
+        row = this.file_list_row(i, result[i], ++index);
         table.insert_row(row, elem.row);
         result[i].row = row;
         result[i].filename = i;
         list.push(result[i]);
+
+        if (!folder)
+          folder = this.file_path(i);
+
         delete result[i];
       }
 
@@ -1553,17 +2805,24 @@ function kolab_files_ui()
       result[key].row = row;
       result[key].filename = key;
       list.push(result[key]);
+
+      if (!folder)
+        folder = file_api.file_path(key);
     });
 
     this.env.file_list = list;
     this.env.folders_loop_lock = false;
+
+    // update document sessions info of this folder
+    if (folder)
+      this.request('folder_info', {folder: folder, sessions: 1}, 'folder_info_response');
   };
 
   // sort files list (without API request)
   this.file_list_sort = function(col, reverse)
   {
     var n, len, list = this.env.file_list,
-      table = $('#filelist'), tbody = $('<tbody>');
+      table = $('#fileslist'), tbody = $('<tbody>', table);
 
     this.env.sort_col = col;
     this.env.sort_reverse = reverse;
@@ -1585,12 +2844,13 @@ function kolab_files_ui()
     $('tbody', table).replaceWith(tbody);
   };
 
+  // Files list record
   this.file_list_row = function(file, data, index)
   {
     var c, col, row = '';
 
-    for (c in rcmail.env.coltypes) {
-      c = rcmail.env.coltypes[c];
+    for (c in rcmail.env.files_coltypes) {
+      c = rcmail.env.files_coltypes[c];
       if (c == 'name')
         col = '<td class="name filename ' + this.file_type_class(data.type) + '">'
           + '<span>' + escapeHTML(data.name) + '</span></td>';
@@ -1610,14 +2870,46 @@ function kolab_files_ui()
       .html(row)
       .attr({id: 'rcmrow' + index, 'data-file': file, 'data-type': data.type});
 
-    $('td.options > span', row).click(function(e) {
-      kolab_files_file_edit_dialog(file);
-    });
-
     // collection (or search) lists files from all folders
     // display file name with full path as title
     if (!this.env.folder)
       $('td.name span', row).attr('title', file);
+
+    return row.get(0);
+  };
+
+  // Sessions list record
+  this.session_list_row = function(id, data)
+  {
+    var c, col, row = '', classes = ['session'];
+
+    for (c in rcmail.env.sessions_coltypes) {
+      c = rcmail.env.sessions_coltypes[c];
+      if (c == 'name')
+        col = '<td class="name filename ' + this.file_type_class(data.type) + '">'
+          + '<span>' + escapeHTML(file_api.file_name(data.file)) + '</span></td>';
+/*
+      else if (c == 'mtime')
+        col = '<td class="mtime">' + data.mtime + '</td>';
+      else if (c == 'size')
+        col = '<td class="size">' + this.file_size(data.size) + '</td>';
+*/
+      else if (c == 'owner')
+        col = '<td class="owner">' + escapeHTML(data.owner_name || data.owner) + '</td>';
+      else if (c == 'options')
+        col = '<td class="options"><span></span></td>';
+
+      row += col;
+    }
+
+    if (data.is_owner)
+      classes.push('owner');
+    else if (data.is_invited)
+      classes.push('invited');
+
+    row = $('<tr>')
+      .html(row)
+      .attr({id: 'rcmrow' + id, 'class': classes.join(' ')});
 
     return row.get(0);
   };
@@ -1638,6 +2930,51 @@ function kolab_files_ui()
       this.env.search = null;
       rcmail.command('files-list');
     }
+  };
+
+  // handler for folder info response
+  this.folder_info_response = function(response)
+  {
+    if (!this.response(response) || !response.result)
+      return;
+
+    var folder = response.result.folder,
+      prefix = folder + file_api.env.directory_separator;
+
+    if (response.result.sessions)
+      this.sessions[folder] = response.result.sessions;
+
+    // update files list with document session info
+    $.each(file_api.env.file_list || [], function(i, file) {
+      // skip files from a different folder (in multi-folder listing)
+      if (file.filename.indexOf(prefix) !== 0)
+        return;
+
+      var classes = [];
+
+      if ($(file.row).is('.selected'))
+        classes.push('selected');
+
+      $.each(response.result.sessions || [], function(session_id, session) {
+        if (file.filename == session.file) {
+          if ($.inArray('session', classes) < 0)
+            classes.push('session');
+
+          if (session.is_owner && $.inArray('owner', classes) < 0)
+            classes.push('owner');
+          else if (session.is_invited && $.inArray('invited', classes) < 0)
+            classes.push('invited');
+        }
+      });
+
+      $(file.row).attr('class', classes.join(' '));
+    });
+
+    // refresh sessions info in time intervals
+    if (rcmail.env.files_caps && rcmail.env.files_caps.MANTICORE && (rcmail.fileslist || rcmail.env.file))
+      this.workers[folder] = setTimeout(function() {
+        file_api.request('folder_info', {folder: folder, sessions: 1}, 'folder_info_response');
+      }, (rcmail.env.files_interval || 60) * 1000);
   };
 
   this.file_get = function(file, params)
@@ -1673,7 +3010,7 @@ function kolab_files_ui()
       dir = this.file_path(rcmail.env.file);
 
       // check if opener window contains files list, if not we can just close current window
-      if (rco && rco.file_list && (opener.file_api.env.folder == dir || !opener.file_api.env.folder))
+      if (rco && rco.fileslist && (opener.file_api.env.folder == dir || !opener.file_api.env.folder))
         self = opener.file_api;
       else
         window.close();
@@ -1835,6 +3172,40 @@ function kolab_files_ui()
       this.display_message('kolab_files.file' + (move ? 'move' : 'copy') + 'notice', 'confirmation');
       if (move)
         this.file_list();
+    }
+  };
+
+  // file(s) create (or clone) request
+  this.file_create = function(file, type, edit, cloneof)
+  {
+    this.file_create_edit_file = edit ? file : null;
+    this.file_create_edit_type = edit ? type : null;
+    this.file_create_folder = this.file_path(file);
+
+    if (cloneof) {
+      this.req = this.set_busy(true, 'kolab_files.filecopying');
+      this.request('file_copy', {file: cloneof, 'new': file}, 'file_create_response');
+    }
+    else {
+      this.req = this.set_busy(true, 'kolab_files.filecreating');
+      this.request('file_create', {file: file, 'content-type': type, content: ''}, 'file_create_response');
+    }
+  };
+
+  // file(s) create response handler
+  this.file_create_response = function(response)
+  {
+    if (!this.response(response))
+      return;
+
+    // @TODO: we could update metadata instead
+    if (this.file_create_folder == this.env.folder)
+      this.file_list();
+
+    // open the file for editing if editable
+    if (this.file_create_edit_file) {
+      var viewer = this.file_type_supported(this.file_create_edit_type, rcmail.env.files_caps);
+      this.file_open(this.file_create_edit_file, viewer, {action: 'edit'});
     }
   };
 
@@ -2109,17 +3480,34 @@ function kolab_files_ui()
 
   this.file_upload_progress_stop = function(id)
   {
-    if (id && this.uploads[id]) {
+    if (id) {
       delete this.uploads[id];
       rcmail.display_progress({name: id});
     }
   };
 
   // open file in new window, using file API viewer
-  this.file_open = function(file, viewer)
+  this.file_open = function(file, viewer, params)
   {
-    var href = '?' + $.param({_task: 'files', _action: 'open', file: file, viewer: viewer == 2 ? 1 : 0});
-    rcmail.open_window(href, false, true);
+    var args = {
+      _task: 'files',
+      _action: params && params.action ? params.action : 'open',
+      _file: file,
+      _viewer: viewer || 0
+    };
+
+    if (params && params.session)
+      args._session = params.session;
+
+    if (rcmail.env.extwin)
+      args._extwin = 1;
+
+    href = '?' + $.param(args);
+
+    if (params && params.local)
+      location.href = href;
+    else
+      rcmail.open_window(href, false, true);
   };
 
   // save file
@@ -2149,6 +3537,100 @@ function kolab_files_ui()
       $('td.filesize', table).text(this.file_size(file.size));
       $('td.filemtime', table).text(file.mtime);
     }
+  };
+
+  // document session delete request
+  this.document_delete = function(id)
+  {
+    this.req = this.set_busy(true, 'kolab_files.sessionterminating');
+    this.deleted_session = id;
+    this.request('document_delete', {id: id}, 'document_delete_response');
+  };
+
+  // document session delete response handler
+  this.document_delete_response = function(response)
+  {
+    if (!this.response(response))
+      return;
+
+    if (rcmail.task == 'files' && rcmail.env.action == 'edit')
+      window.close();
+
+    // @todo: force sessions info update
+
+    var win = window, list = rcmail.sessionslist;
+
+    if (!list) {
+      win = window.opener;
+      if (win && win.rcmail && win.file_api)
+        list = win.rcmail.sessionslist;
+    }
+
+    // remove session from the list (if sessions list exist)
+    if (list) {
+      list.remove(this.deleted_session);
+      delete win.file_api.env.sessions_list[this.deleted_session];
+    }
+  };
+
+  // Invite document session participants
+  this.document_invite = function(id, attendees, comment)
+  {
+    var list = [];
+
+    // expect attendees to be email => name hash
+    $.each(attendees || {}, function() { list.push(this); });
+
+    if (list.length) {
+      this.req = this.set_busy(true, 'kolab_files.documentinviting');
+      this.request('document_invite', {id: id, users: list, comment: comment || ''}, 'document_invite_response');
+    }
+  };
+
+  // document invite response handler
+  this.document_invite_response = function(response)
+  {
+    if (!this.response(response) || !response.result)
+      return;
+
+    var info = rcmail.env.file_data,
+      table = $('#document-editors-dialog table > tbody');
+
+    $.each(response.result.list || {}, function() {
+      var record = kolab_files_attendee_record(this.user, this.status, this.user_name);
+      table.append(record);
+      if (info.session && info.session.invitations)
+        info.session.invitations.push($.extend({status: 'invited', record: record}, this));
+    });
+  };
+
+  // Cancel invitations to an editing session
+  this.document_cancel = function(id, attendees)
+  {
+    if (attendees.length) {
+      this.req = this.set_busy(true, 'kolab_files.documentcancelling');
+      this.request('document_cancel', {id: id, users: attendees}, 'document_cancel_response');
+    }
+  };
+
+  // document_cancel response handler
+  this.document_cancel_response = function(response)
+  {
+    if (!this.response(response) || !response.result)
+      return;
+
+    var info = rcmail.env.file_data;
+
+    $.each(response.result.list || {}, function(i, user) {
+      var invitations = [];
+      $.each(info.session.invitations, function(i, u) {
+        if (u.user == user && u.record)
+          u.record.remove();
+        else
+          invitations.push(u);
+      });
+      info.session.invitations = invitations;
+    });
   };
 
   // handle auth errors on folder list
@@ -2217,13 +3699,14 @@ function kolab_files_ui()
     if (!this.response(response))
       return;
 
-    var cnt = 0, folders,
+    var folders, found,
       folder = response.result.folder,
-      parent = $('#' + this.env.folders[folder].id);
+      id = 'rcmli' + rcmail.html_identifier_encode(folder),
+      parent = $('#' + id);
 
     // try parent window if the folder element does not exist
     if (!parent.length && window.parent && window.parent.rcmail) {
-      parent = $('#' + this.env.folders[folder].id, window.parent.document.body);
+      parent = $('#' + id, window.parent.document.body);
     }
 
     delete this.auth_errors[folder];
@@ -2232,22 +3715,22 @@ function kolab_files_ui()
     // go to the next one
     this.folder_list_auth_errors();
 
-    // count folders on the list
-    $.each(this.env.folders, function() { cnt++; });
-
     // parse result
-    folders = this.folder_list_parse(response.result.list, cnt);
+    folders = this.folder_list_parse(response.result.list);
     delete folders[folder]; // remove root added in folder_list_parse()
 
     // add folders from the external source to the list
     $.each(folders, function(i, f) {
-      var row = file_api.folder_list_row(i, f);
-      parent.after(row);
-      parent = row;
+      file_api.folder_list_row(i, f, parent.get(0));
+      found = true;
     });
 
+    // reset folders list widget
+    if (found)
+      rcmail.folder_list.reset(true);
+
     // add tree icons
-    this.folder_list_tree(folders);
+//    this.folder_list_tree(folders);
 
     $.extend(this.env.folders, folders);
   };

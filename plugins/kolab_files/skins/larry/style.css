@@ -36,6 +36,11 @@
   background-position: center -93px;
 }
 
+#filestoolbar a.button.export {
+  background-position: 0 -93px;
+  min-width: 50px;
+}
+
 #filestoolbar a.button.open {
   background-position: center -131px;
 }
@@ -44,8 +49,16 @@
   background-image: url(../../../../skins/larry/images/buttons.png);
 }
 
+#filestoolbar a.button.create {
+  background-position: center -315px;
+}
+
 #filestoolbar a.button.edit {
   background-position: center -173px;
+}
+
+#filestoolbar a.button.rename {
+  background-position: center -357px;
 }
 
 #filestoolbar a.button.save {
@@ -60,6 +73,50 @@
 
 #filestoolbar form {
   display: inline;
+}
+
+#filestoolbar > label {
+  line-height: 42px;
+  vertical-align: top;
+  color: #555;
+  text-shadow: 0 1px 1px #eee;
+}
+
+ul.toolbarmenu li span.saveas {
+  background: url(images/buttons.png) -5px -253px no-repeat;
+}
+
+#document-title {
+  width: 200px;
+}
+
+#collaborators {
+  position: absolute;
+  right: 0;
+  top: -6px;
+}
+
+#collaborators #members {
+  float: right;
+}
+
+#collaborators #members img.photo {
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+  background: url(../../../../skins/larry/images/contactpic_32px.png) center center no-repeat #fff;
+  border-radius: 5px;
+  border: solid 3px #eee;
+  margin-left: 5px;
+}
+
+#collaborators a.button.add {
+  background: url(../../../../skins/larry/images/buttons.png) -5px -357px no-repeat;
+  min-width: 16px;
+  width: 16px;
+  height: 16px;
+  padding: 2px;
+  margin-top: 10px;
 }
 
 #quicksearchbar #filesearchmenulink {
@@ -87,6 +144,10 @@
   overflow: auto;
 }
 
+#filecontent.docedit {
+  left: 0;
+}
+
 #filelistbox {
   overflow: auto;
   top: 0;
@@ -106,52 +167,95 @@
   border: 0;
 }
 
-#files-folder-list ul li span.name {
-  background: url(../../../../skins/larry/images/listicons.png) 6px 3px no-repeat;
-  padding: 6px 8px 6px 32px;
-  line-height: 25px;
-  color: #376572;
+#folderlistbox .scroller {
+  top: 34px;
 }
 
-#files-folder-list ul li.mailbox.collection span.name {
+#folderlistbox .boxtitle a.iconbutton.search {
+  background-position: -2px -317px;
+  cursor: pointer;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 16px;
+}
+
+.folderlist li.mailbox.collection a.name {
   background: url(images/folders.png) 5px 0 no-repeat;
 }
-#files-folder-list ul li.mailbox.collection.audio span.name {
-  background-position: 5px -95px;
+.folderlist li.mailbox.collection.audio a.name {
+  background-position: 5px -96px;
 }
-#files-folder-list ul li.mailbox.collection.video span.name {
-  background-position: 5px -143px;
+.folderlist li.mailbox.collection.video a.name {
+  background-position: 5px -144px;
 }
-#files-folder-list ul li.mailbox.collection.document span.name {
+.folderlist li.mailbox.collection.document a.name {
   background-position: 5px 0;
 }
-#files-folder-list ul li.mailbox.collection.image span.name {
+.folderlist li.mailbox.collection.image a.name {
   background-position: 5px -48px;
 }
-#files-folder-list ul li.mailbox.collection.audio.selected span.name {
+.folderlist li.mailbox.collection.sessions a.name {
+  background-position: 5px -192px;
+}
+.folderlist li.mailbox.collection.audio.selected a.name {
   background-position: 5px -119px;
 }
-#files-folder-list ul li.mailbox.collection.video.selected span.name {
+.folderlist li.mailbox.collection.video.selected a.name {
   background-position: 5px -167px;
 }
-#files-folder-list ul li.mailbox.collection.document.selected span.name {
-  background-position: 5px -24px;
+.folderlist li.mailbox.collection.document.selected a.name {
+  backgroundposition: 5px -24px;
 }
-#files-folder-list ul li.mailbox.collection.image.selected span.name {
+.folderlist li.mailbox.collection.image.selected a.name {
   background-position: 5px -72px;
 }
+.folderlist li.mailbox.collection.sessions.selected a.name {
+  background-position: 5px -216px;
+}
 
-#files-folder-list ul li span.branch {
+#files-folder-list li a.subscription {
   display: inline-block;
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  height: 16px;
+  width: 16px;
+  padding: 0;
+  background: url(images/listicons.png) -16px -148px no-repeat;
+  overflow: hidden;
+  cursor: pointer;
 }
 
-#files-folder-list ul li:first-child {
-  border-radius: 4px 4px 0 0;
-  border-top: 0;
+#files-folder-list li a.subscription.subscribed {
+  background-position: -16px -110px;
 }
 
-#files-folder-list ul li.virtual span {
-  color: #aaa;
+#files-folder-list .searchresults .boxtitle {
+  border-radius: 0;
+  padding: 2px 8px;
+}
+
+#files-folder-list .searchresults {
+  margin-top: 8px;
+}
+
+#files-folder-list li.readonly {
+  background-image: url(images/listicons.png);
+  background-position: right -1000px;
+  background-repeat: no-repeat;
+}
+
+#files-folder-list li.readonly {
+  background-position: 88% -14px;
+}
+
+#files-folder-list li.readonly a {
+  padding-right: 40px;
+}
+
+#files-folder-list li.readonly a.subscription {
+  padding-right: 0;
 }
 
 .filelist thead tr th {
@@ -179,7 +283,6 @@
 
 .filelist tr > .options {
   width: 32px;
-  cursor: pointer;
 }
 
 .filelist thead tr th.filename,
@@ -241,13 +344,6 @@
   border-radius: 4px 0 0 0;
 }
 
-.filelist tbody tr td.options:hover span {
-  width: 26px;
-  height: 18px;
-  background: url(../../../../skins/larry/images/buttons.png) -5px -417px no-repeat;
-  display: block;
-}
-
 .filelist td.filename {
   padding: 0 4px;
 }
@@ -258,12 +354,23 @@
   height: 16px;
 }
 
-/*
-.filelist tbody td.filename span input {
-  padding: 0 2px;
-  height: 18px;
+.filelist tbody td.options span {
+  background-image: url(images/listicons.png);
+  display: block;
+  height: 16px;
 }
-*/
+
+.filelist tbody tr.session > td.options span {
+  background-position: center -212px;
+}
+
+.filelist tbody tr.session.invited > td.options span {
+  background-position: center -236px;
+}
+
+.filelist tbody tr.session.owner > td.options span {
+  background-position: center -188px;
+}
 
 #fileinfobox table {
   table-layout: fixed;
@@ -310,11 +417,15 @@
 
 #files-dialog,
 #files-compose-dialog,
+#files-file-rename-dialog,
+#files-file-create-dialog,
 #files-file-edit-dialog,
 #files-folder-mount-dialog,
 #files-folder-auth-dialog,
 #files-folder-create-dialog,
-#files-folder-edit-dialog {
+#files-folder-edit-dialog,
+#document-invitation-dialog,
+#document-editors-dialog {
   display: none;
 }
 
@@ -327,7 +438,7 @@
 }
 
 #files-dialog #folderlistbox {
-  top: 5px;
+  top: 35px;
   bottom: 5px;
   left: 0;
   right: 0;
@@ -335,8 +446,21 @@
   box-shadow: none;
 }
 
+#files-dialog #folderlistbox .scroller {
+  top: 0;
+}
+
+#files-dialog .listsearchbox {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: #fff;
+}
+
 #files-dialog.saveas #folderlistbox {
-  top: 50px;
+  bottom: 40px;
 }
 
 #files-compose-dialog #filelistcontainer {
@@ -365,6 +489,11 @@
   cursor: pointer;
 }
 
+#files-file-edit-dialog label {
+  display: block;
+  height: 20px;
+}
+
 a.filesaveall {
   display: inline-block;
   margin-top: .5em;
@@ -374,14 +503,19 @@ a.filesaveall {
 #file-save-as {
   height: 25px;
   white-space: nowrap;
+  position: absolute;
+  bottom: 8px;
+  left: 5px;
+  right: 5px;
+  text-align: center;
 }
 
 #file-save-as input {
   width: 200px;
 }
 
-ul.toolbarmenu li span.saveas {
-  background: url(images/buttons.png) -5px -253px no-repeat;
+#file-rename-form input {
+  width: 98%;
 }
 
 table.propform td.source.selected {
@@ -432,4 +566,65 @@ table.propform td.source table.propform td {
 .auth-options input,
 .auth-options label {
   vertical-align: middle;
+}
+
+#document-editors-dialog textarea {
+  width: 98%
+}
+
+#document-editors-dialog label {
+  display: block;
+}
+
+#document-editors-dialog table {
+  margin-top: 0.5em;
+  margin-bottom: 1em;
+}
+
+#document-editors-dialog table th.status {
+  width: 9em;
+}
+
+#document-editors-dialog table th.options {
+  width: 16px
+}
+
+#document-editors-dialog table td.status select {
+  width: 100%;
+}
+
+#document-editors-dialog table td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+#document-editors-dialog table td.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: auto;
+}
+
+#document-editors-dialog table tr:last-child td {
+  border-bottom: 0;
+}
+
+#document-editors-dialog table tr.organizer td {
+  color: #888;
+}
+
+#document-editors-dialog table td.options a.delete {
+  background: url(../../../../skins/larry/images/buttons.png) -7px -379px no-repeat;
+  height: 16px;
+  width: 16px;
+  display: block;
+}
+
+#document-invitation-dialog table {
+  margin-top: 15px;
+}
+
+#document-invitation-dialog table td.label {
+  width: 1%;
+  white-space: nowrap;
+  font-weight: bold;
 }

@@ -6,7 +6,7 @@
  * @version @package_version@
  * @author Thomas Bruederli <bruederli@kolabsys.com>
  *
- * Copyright (C) 2012, Kolab Systems AG <contact@kolabsys.com>
+ * Copyright (C) 2012-2015, Kolab Systems AG <contact@kolabsys.com>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as
@@ -78,6 +78,7 @@ class tasklist_database_driver extends tasklist_driver
           $arr['name'] = html::quote($arr['name']);
           $arr['listname'] = html::quote($arr['name']);
           $arr['editable'] = true;
+          $arr['rights'] = 'lrswikxtea';
           $this->lists[$arr['id']] = $arr;
           $list_ids[] = $this->rc->db->quote($arr['id']);
         }
@@ -272,7 +273,7 @@ class tasklist_database_driver extends tasklist_driver
     }
 
     /**
-     * Get all taks records matching the given filter
+     * Get all task records matching the given filter
      *
      * @param array Hash array wiht filter criterias
      * @param array List of lists to get tasks from
@@ -557,6 +558,9 @@ class tasklist_database_driver extends tasklist_driver
         if (is_array($prop['recurrence'])) {
             $prop['recurrence'] = $this->serialize_recurrence($prop['recurrence']);
         }
+        if (array_key_exists('complete', $prop)) {
+            $prop['complete'] = number_format($prop['complete'], 2, '.', '');
+        }
 
         foreach (array('parent_id', 'date', 'time', 'startdate', 'starttime', 'alarms', 'recurrence', 'status') as $col) {
             if (empty($prop[$col]))
@@ -583,7 +587,7 @@ class tasklist_database_driver extends tasklist_driver
             join(',', (array)$prop['tags']),
             $prop['flagged'] ? 1 : 0,
             intval($prop['complete']),
-            $prop['status'],
+            strval($prop['status']),
             $prop['alarms'],
             $prop['recurrence'],
             $notify_at
@@ -609,6 +613,9 @@ class tasklist_database_driver extends tasklist_driver
         }
         if (is_array($prop['recurrence'])) {
             $prop['recurrence'] = $this->serialize_recurrence($prop['recurrence']);
+        }
+        if (array_key_exists('complete', $prop)) {
+            $prop['complete'] = number_format($prop['complete'], 2, '.', '');
         }
 
         $sql_set = array();

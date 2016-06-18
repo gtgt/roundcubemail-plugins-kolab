@@ -1,4 +1,11 @@
 <?php
+/**
+ * Localizations for the Kolab Folders plugin
+ *
+ * Copyright (C) 2015, Kolab Systems AG
+ *
+ * For translation see https://www.transifex.com/projects/p/kolab/resource/kolab_notes/
+ */
 $labels['navtitle'] = 'Poznámky';
 $labels['tags'] = 'Značky';
 $labels['lists'] = 'Zápisníky';
@@ -33,7 +40,7 @@ $labels['nrnotebooksfound'] = '$nr zápisníků nalezeno';
 $labels['nonotebooksfound'] = 'Nenalezeny žádné zápisníky';
 $labels['removelist'] = 'Odstranit ze seznamu';
 $labels['removelink'] = 'Odstranit odkaz na e-mail';
-$labels['savingdata'] = 'Ukládám data...';
+$labels['savingdata'] = 'Ukládají se data...';
 $labels['recordnotfound'] = 'Záznam nenalezen';
 $labels['norecordsfound'] = 'Nenalezeny žádné poznámky';
 $labels['nochanges'] = 'Žádné změny k uložení';

@@ -2,9 +2,9 @@
     "name": "kolab/kolab_shortcuts",
     "type": "roundcube-plugin",
     "description": "Keyboard shortcuts compatible with Kontact",
-    "homepage": "http://git.kolab.org/roundcubemail-plugins-kolab/",
+    "homepage": "https://git.kolab.org/diffusion/RPK/",
     "license": "AGPLv3",
-    "version": "3.2.5",
+    "version": "3.2.6",
     "authors": [
         {
             "name": "Aleksander Machniak",
