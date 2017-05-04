@@ -64,7 +64,6 @@ class kolab_auth extends rcube_plugin
         // Enable debug logs (per-user), when logged as another user
         if (!empty($_SESSION['kolab_auth_admin']) && $rcmail->config->get('kolab_auth_auditlog')) {
             $rcmail->config->set('debug_level', 1);
-            $rcmail->config->set('devel_mode', true);
             $rcmail->config->set('smtp_log', true);
             $rcmail->config->set('log_logins', true);
             $rcmail->config->set('log_session', true);
@@ -390,17 +389,10 @@ class kolab_auth extends rcube_plugin
 
         $ldap = self::ldap();
         if (!$ldap || !$ldap->ready) {
-            $args['abort'] = true;
-            $args['kolab_ldap_error'] = true;
-            $message = sprintf(
-                    'Login failure for user %s from %s in session %s (error %s)',
-                    $user,
-                    rcube_utils::remote_ip(),
-                    session_id(),
-                    "LDAP not ready"
-                );
+            self::log_login_error($user, "LDAP not ready");
 
-            rcube::write_log('userlogins', $message);
+            $args['abort']            = true;
+            $args['kolab_ldap_error'] = true;
 
             return $args;
         }
@@ -409,16 +401,9 @@ class kolab_auth extends rcube_plugin
         $record = $ldap->get_user_record($user, $host);
 
         if (empty($record)) {
-            $args['abort'] = true;
-            $message = sprintf(
-                    'Login failure for user %s from %s in session %s (error %s)',
-                    $user,
-                    rcube_utils::remote_ip(),
-                    session_id(),
-                    "No user record found"
-                );
+            self::log_login_error($user, "No user record found");
 
-            rcube::write_log('userlogins', $message);
+            $args['abort'] = true;
 
             return $args;
         }
@@ -452,16 +437,9 @@ class kolab_auth extends rcube_plugin
             $result = $ldap->bind($record['dn'], $pass);
 
             if (!$result) {
-                $args['abort'] = true;
-                $message = sprintf(
-                        'Login failure for user %s from %s in session %s (error %s)',
-                        $user,
-                        rcube_utils::remote_ip(),
-                        session_id(),
-                        "Unable to bind with '" . $record['dn'] . "'"
-                    );
+                self::log_login_error($user, "Unable to bind with '" . $record['dn'] . "'");
 
-                rcube::write_log('userlogins', $message);
+                $args['abort'] = true;
 
                 return $args;
             }
@@ -549,16 +527,7 @@ class kolab_auth extends rcube_plugin
                     'vars' => array('user' => rcube::Q($loginas)),
                 ));
 
-                $message = sprintf(
-                        'Login failure for user %s (as user %s) from %s in session %s (error %s)',
-                        $user,
-                        $loginas,
-                        rcube_utils::remote_ip(),
-                        session_id(),
-                        "No privileges to login as '" . $loginas . "'"
-                    );
-
-                rcube::write_log('userlogins', $message);
+                self::log_login_error($user, "No privileges to login as '" . $loginas . "'", $loginas);
 
                 return $args;
             }
@@ -770,6 +739,17 @@ class kolab_auth extends rcube_plugin
     }
 
     /**
+     * Close LDAP connection
+     */
+    public static function ldap_close()
+    {
+        if (self::$ldap) {
+            self::$ldap->close();
+            self::$ldap = null;
+        }
+    }
+
+    /**
      * Parses LDAP DN string with replacing supported variables.
      * See kolab_auth_ldap::parse_vars()
      *
@@ -784,5 +764,36 @@ class kolab_auth extends rcube_plugin
         }
 
         return $str;
+    }
+
+    /**
+     * Log failed logins
+     *
+     * @param string $username Username/Login
+     * @param string $message  Error message (failure reason)
+     * @param string $login_as Username/Login of "login as" user
+     */
+    public static function log_login_error($username, $message = null, $login_as = null)
+    {
+        $config = rcube::get_instance()->config;
+
+        if ($config->get('log_logins')) {
+            if ($login_as) {
+                $username = sprintf('%s (as user %s)', $username, $login_as);
+            }
+
+            $message = sprintf(
+                "Failed login for %s from %s in session %s %s",
+                $username,
+                rcube_utils::remote_ip(),
+                session_id(),
+                $message ? "($message)" : ''
+            );
+
+            rcube::write_log('userlogins', $message);
+
+            // disable log_logins to prevent from duplicate log entries
+            $config->set('log_logins', false);
+        }
     }
 }

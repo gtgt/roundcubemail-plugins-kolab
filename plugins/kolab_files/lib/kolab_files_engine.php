@@ -127,6 +127,11 @@ class kolab_files_engine
                 ), 'taskbar');
         }
 
+        if ($_SESSION['kolab_files_caps']['MANTICORE'] || $_SESSION['kolab_files_caps']['WOPI']) {
+            $_SESSION['kolab_files_caps']['DOCEDIT'] = true;
+            $_SESSION['kolab_files_caps']['DOCTYPE'] = $_SESSION['kolab_files_caps']['MANTICORE'] ? 'manticore' : 'wopi';
+        }
+
         $this->plugin->include_stylesheet($this->plugin->local_skin_path().'/style.css');
         $this->plugin->include_script($this->url . '/js/files_api.js');
         $this->plugin->include_script('kolab_files.js');
@@ -136,7 +141,7 @@ class kolab_files_engine
         $this->rc->output->set_env('files_caps', $_SESSION['kolab_files_caps']);
         $this->rc->output->set_env('files_user', $this->rc->get_user_name());
 
-        if ($_SESSION['kolab_files_caps']['MANTICORE']) {
+        if ($_SESSION['kolab_files_caps']['DOCEDIT']) {
             $this->plugin->add_label('declinednotice', 'invitednotice', 'acceptedownernotice',
                 'declinedownernotice', 'requestednotice', 'acceptednotice', 'declinednotice',
                 'more', 'accept', 'decline', 'join', 'status', 'when', 'file', 'comment',
@@ -445,16 +450,11 @@ class kolab_files_engine
         $select_type   = new html_select(array('id' => 'file-create-type', 'name' => 'type'));
         $table         = new html_table(array('cols' => 2, 'class' => 'propform'));
 
-        // @TODO: get this list from Chwala API
-        $types = array(
-            'application/vnd.oasis.opendocument.text' => 'odt',
-            'text/plain' => 'txt',
-            'text/html'  => 'html',
-        );
-        foreach (array_keys($types) as $type) {
-            list ($app, $label) = explode('/', $type);
-            $label = preg_replace('/[^a-z]/', '', $label);
-            $select_type->add($this->plugin->gettext('type.' . $label), $type);
+        $types = array();
+
+        foreach ($this->get_mimetypes('edit') as $type => $mimetype) {
+            $types[$type] = $mimetype['ext'];
+            $select_type->add($mimetype['label'], $type);
         }
 
         $table->add('title', html::label('file-create-name', rcube::Q($this->plugin->gettext('filename'))));
@@ -769,7 +769,27 @@ class kolab_files_engine
         $attrib['src']             = $href;
         $attrib['onload']          = 'kolab_files_frame_load(this)';
 
-        return html::iframe($attrib);
+        // editor requires additional arguments via POST
+        if (!empty($this->file_data['viewer']['post'])) {
+            $attrib['src'] = $this->rc->output->asset_url('program/resources/blank.gif');
+
+            $form_content = new html_hiddenfield();
+            $form_attrib  = array(
+                'action' => $href,
+                'id'     => $attrib['id'] . '-form',
+                'target' => $attrib['name'],
+                'method' => 'post',
+            );
+
+            foreach ($this->file_data['viewer']['post'] as $name => $value) {
+                $form_content->add(array('name' => $name, 'value' => $value));
+            }
+
+            $form = html::tag('form', $form_attrib, $form_content->show())
+                . html::script(array(), "\$('#{$attrib['id']}-form').submit()");
+        }
+
+        return html::iframe($attrib) . $form;
     }
 
     /**
@@ -916,6 +936,14 @@ class kolab_files_engine
         // some HTTP server configurations require this header
         $this->request->setHeader('accept', "application/json,text/javascript,*/*");
 
+        // Localization
+        $this->request->setHeader('accept-language', $_SESSION['language']);
+
+        // set Referer which is used as an origin for cross-window
+        // communication with document editor iframe
+        $host = $_SERVER['REQUEST_SCHEME'] . '://' . $_SERVER['HTTP_HOST'];
+        $this->request->setHeader('referer', $host);
+
         return $this->request;
     }
 
@@ -932,6 +960,11 @@ class kolab_files_engine
         );
 
         $this->folder_list_env();
+
+        if ($this->rc->task == 'files') {
+            $this->rc->output->set_env('folder', rcube_utils::get_input_value('folder', rcube_utils::INPUT_GET));
+            $this->rc->output->set_env('collection', rcube_utils::get_input_value('collection', rcube_utils::INPUT_GET));
+        }
 
         $this->rc->output->add_label('uploadprogress', 'GB', 'MB', 'KB', 'B');
         $this->rc->output->set_pagetitle($this->plugin->gettext('files'));
@@ -1252,7 +1285,7 @@ class kolab_files_engine
                     'html'      => $content,
                     'name'      => $attachment['name'],
                     'mimetype'  => $attachment['mimetype'],
-                    'classname' => rcmail_filetype2classname($attachment['mimetype'], $attachment['name']),
+                    'classname' => rcube_utils::file2class($attachment['mimetype'], $attachment['name']),
                     'complete'  => true), $uploadid);
             }
             else if ($attachment['error']) {
@@ -1349,36 +1382,77 @@ class kolab_files_engine
         ));
 
         $placeholder = $this->rc->output->asset_url('program/resources/blank.gif');
-        $manticore = ($viewer & 4) && $this->file_data['viewer']['manticore'];
+
+        if ($this->file_data['viewer']['wopi']) {
+            $editor_type = 'wopi';
+            $got_editor  = ($viewer & 4);
+        }
+        else if ($this->file_data['viewer']['manticore']) {
+            $editor_type = 'manticore';
+            $got_editor = ($viewer & 4);
+        }
 
         // this one is for styling purpose
         $this->rc->output->set_env('extwin', true);
         $this->rc->output->set_env('file', $file);
         $this->rc->output->set_env('file_data', $this->file_data);
+        $this->rc->output->set_env('editor_type', $editor_type);
         $this->rc->output->set_env('photo_placeholder', $placeholder);
         $this->rc->output->set_pagetitle(rcube::Q($file));
-        $this->rc->output->send('kolab_files.' . ($manticore ? 'docedit' : 'filepreview'));
+        $this->rc->output->send('kolab_files.' . ($got_editor ? 'docedit' : 'filepreview'));
     }
 
     /**
      * Returns mimetypes supported by File API viewers
      */
-    protected function get_mimetypes()
+    protected function get_mimetypes($type = 'view')
     {
-        $token   = $this->get_api_token();
-        $request = $this->get_request(array('method' => 'mimetypes'), $token);
+        $mimetypes = array();
 
         // send request to the API
         try {
-            $response = $request->send();
-            $status   = $response->getStatus();
-            $body     = @json_decode($response->getBody(), true);
+            if ($this->mimetypes === null) {
+                $this->mimetypes = false;
 
-            if ($status == 200 && $body['status'] == 'OK') {
-                $mimetypes = $body['result'];
+                $token    = $this->get_api_token();
+                $request  = $this->get_request(array('method' => 'mimetypes'), $token);
+                $response = $request->send();
+                $status   = $response->getStatus();
+                $body     = @json_decode($response->getBody(), true);
+
+                if ($status == 200 && $body['status'] == 'OK') {
+                    $this->mimetypes = $body['result'];
+                }
+                else {
+                    throw new Exception($body['reason'] ?: "Failed to get mimetypes. Status: $status");
+                }
             }
-            else {
-                throw new Exception($body['reason'] ?: "Failed to get mimetypes. Status: $status");
+
+            if (is_array($this->mimetypes)) {
+                if (array_key_exists($type, $this->mimetypes)) {
+                    $mimetypes = $this->mimetypes[$type];
+                }
+                else {
+                    $mimetypes = $this->mimetypes;
+                }
+            }
+
+            // fallback to static definition if old Chwala is used
+            if ($type == 'edit' && empty($mimetypes)) {
+                $mimetypes = array(
+                    'application/vnd.oasis.opendocument.text' => 'odt',
+                    'text/plain' => 'txt',
+                    'text/html'  => 'html',
+                );
+
+                foreach (array_keys($mimetypes) as $type) {
+                    list ($app, $label) = explode('/', $type);
+                    $label = preg_replace('/[^a-z]/', '', $label);
+                    $mimetypes[$type] = array(
+                        'ext'   => $mimetypes[$type],
+                        'label' => $this->plugin->gettext('type.' . $label),
+                    );
+                }
             }
         }
         catch (Exception $e) {

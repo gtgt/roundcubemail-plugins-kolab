@@ -161,7 +161,7 @@ class libcalendaring_itip
         $message->setTXTBody(rcube_mime::format_flowed($mailbody, 79));
 
         if ($this->rc->config->get('libcalendaring_itip_debug', false)) {
-            console('iTip ' . $method, $message->txtHeaders() . "\n\r" . $message->get());
+            rcube::console('iTip ' . $method, $message->txtHeaders() . "\r\n" . $message->get());
         }
 
         // finally send the message
@@ -258,6 +258,21 @@ class libcalendaring_itip
         else if ($method == 'CANCEL') {
             if ($event['recurrence']) {
                 unset($event['recurrence']['EXCEPTIONS']);
+            }
+        }
+
+        // Set SENT-BY property if the sender is not the organizer
+        if ($method == 'CANCEL' || $method == 'REQUEST') {
+            foreach ((array)$event['attendees'] as $idx => $attendee) {
+                if ($attendee['role'] == 'ORGANIZER'
+                    && $attendee['email']
+                    && strcasecmp($attendee['email'], $from) != 0
+                    && strcasecmp($attendee['email'], $from_utf) != 0
+                ) {
+                    $attendee['sent-by'] = 'mailto:' . $from_utf;
+                    $event['organizer'] = $event['attendees'][$idx] = $attendee;
+                    break;
+                }
             }
         }
 
@@ -359,8 +374,8 @@ class libcalendaring_itip
     {
       $action = $event['rsvp'] ? 'rsvp' : '';
       $status = $event['fallback'];
-      $latest = false;
-      $html = '';
+      $latest = $resheduled = false;
+      $html   = '';
 
       if (is_numeric($event['changed']))
         $event['changed'] = new DateTime('@'.$event['changed']);
@@ -384,6 +399,13 @@ class libcalendaring_itip
               break;
             }
           }
+
+          // Detect re-sheduling
+          if (!$latest) {
+            // FIXME: This is probably to simplistic, or maybe we should just check
+            //        attendee's RSVP flag in the new event?
+            $resheduled = $existing['start'] != $event['start'] || $existing['end'] > $event['end'];
+          }
         }
         else {
           $rsvp = $event['rsvp'] && $this->rc->config->get('calendar_allow_itip_uninvited', true);
@@ -406,8 +428,11 @@ class libcalendaring_itip
           else if (!$existing && !$rsvp) {
             $action = 'import';
           }
-          else if ($latest && $status_lc != 'needs-action') {
-            $action = 'update';
+          else if ($resheduled) {
+            $action = 'rsvp';
+          }
+          else if ($status_lc != 'needs-action') {
+            $action = !$latest ? 'update' : '';
           }
 
           $html = html::div('rsvp-status ' . $status_lc, $status_text);
@@ -453,14 +478,15 @@ class libcalendaring_itip
       }
 
       return array(
-          'uid' => $event['uid'],
-          'id' => asciiwords($event['uid'], true),
-          'existing' => $existing ? true : false,
-          'saved' => $existing ? true : false,
-          'latest' => $latest,
-          'status' => $status,
-          'action' => $action,
-          'html' => $html,
+          'uid'        => $event['uid'],
+          'id'         => asciiwords($event['uid'], true),
+          'existing'   => $existing ? true : false,
+          'saved'      => $existing ? true : false,
+          'latest'     => $latest,
+          'status'     => $status,
+          'action'     => $action,
+          'resheduled' => $resheduled,
+          'html'       => $html,
       );
     }
 
@@ -721,10 +747,22 @@ class libcalendaring_itip
         }
 
         // add input field for reply comment
-        $rsvp_additions .= html::a(array('href' => '#toggle', 'class' => 'reply-comment-toggle'), $this->gettext('itipeditresponse'));
-        $rsvp_additions .= html::div('itip-reply-comment',
-            html::tag('textarea', array('id' => 'reply-comment-'.$dom_id, 'name' => '_comment', 'cols' => 40, 'rows' => 6, 'style' => 'display:none', 'placeholder' => $this->gettext('itipcomment')), '')
+        $toggle_attrib = array(
+            'href'    => '#toggle',
+            'class'   => 'reply-comment-toggle',
+            'onclick' => '$(this).hide().parent().find(\'textarea\').show().focus()'
         );
+        $textarea_attrib = array(
+            'id'    => 'reply-comment-' . $dom_id,
+            'name'  => '_comment',
+            'cols'  => 40,
+            'rows'  => 6,
+            'style' => 'display:none',
+            'placeholder' => $this->gettext('itipcomment')
+        );
+
+        $rsvp_additions .= html::a($toggle_attrib, $this->gettext('itipeditresponse'))
+            . html::div('itip-reply-comment', html::tag('textarea', $textarea_attrib, ''));
 
         return $rsvp_additions;
     }

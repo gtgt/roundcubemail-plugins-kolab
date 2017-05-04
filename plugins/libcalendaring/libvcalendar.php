@@ -45,6 +45,12 @@ class libvcalendar implements Iterator
         'delegated-from'  => 'DELEGATED-FROM',
         'delegated-to'    => 'DELEGATED-TO',
         'schedule-status' => 'SCHEDULE-STATUS',
+        'sent-by'         => 'SENT-BY',
+    );
+    private $organizer_keymap = array(
+        'name'            => 'CN',
+        'schedule-status' => 'SCHEDULE-STATUS',
+        'sent-by'         => 'SENT-BY',
     );
     private $iteratorkey = 0;
     private $charset;
@@ -591,8 +597,8 @@ class libvcalendar implements Iterator
                 $event['allday'] = true;
             }
 
-            // all-day events may lack the DTEND property
-            if ($event['allday'] && empty($event['end'])) {
+            // events may lack the DTEND property, set it to DTSTART (RFC5545 3.6.1)
+            if (empty($event['end'])) {
                 $event['end'] = clone $event['start'];
             }
             // shift end-date by one day (except Thunderbird)
@@ -1173,7 +1179,7 @@ class libvcalendar implements Iterator
 
         if ($event['organizer']) {
             $ve->add('ORGANIZER', 'mailto:' . $event['organizer']['email'],
-                array_filter(self::map_keys($event['organizer'], array('name' => 'CN', 'schedule-status' => 'SCHEDULE-STATUS'))));
+                array_filter(self::map_keys($event['organizer'], $this->organizer_keymap)));
         }
 
         foreach ((array)$event['url'] as $url) {

@@ -299,12 +299,13 @@ class rcube_kolab_contacts extends rcube_addressbook
         $groups = array();
 
         foreach ((array)$this->distlists as $group) {
-            if (!$search || strstr(strtolower($group['name']), strtolower($search)))
-                $groups[$group['name']] = array('ID' => $group['ID'], 'name' => $group['name']);
+            if (!$search || strstr(mb_strtolower($group['name']), mb_strtolower($search))) {
+                $groups[$group['ID']] = array('ID' => $group['ID'], 'name' => $group['name']);
+            }
         }
 
-        // sort groups
-        ksort($groups, SORT_LOCALE_STRING);
+        // sort groups by name
+        uasort($groups, function($a, $b) { return strcoll($a['name'], $b['name']); });
 
         return array_values($groups);
     }
@@ -414,6 +415,7 @@ class rcube_kolab_contacts extends rcube_addressbook
      *                          0 - partial (*abc*),
      *                          1 - strict (=),
      *                          2 - prefix (abc*)
+     *                          4 - include groups (if supported)
      * @param boolean $select   True if results are requested, False if count only
      * @param boolean $nocount  True to skip the count query (select only)
      * @param array   $required List of fields that cannot be empty
@@ -436,7 +438,7 @@ class rcube_kolab_contacts extends rcube_addressbook
             return $result;
         }
         else if ($fields == '*') {
-          $fields = $this->search_fields;
+            $fields = $this->search_fields;
         }
 
         if (!is_array($fields))
@@ -464,6 +466,8 @@ class rcube_kolab_contacts extends rcube_addressbook
         if (in_array('birthday', $required)) {
             $squery[] = array('tags', '=', 'x-has-birthday');
         }
+
+        $squery[] = array('type', '=', 'contact');
 
         // get all/matching records
         $this->_fetch_contacts($squery);
@@ -1174,10 +1178,14 @@ class rcube_kolab_contacts extends rcube_addressbook
         }
 
         if (count($cols) == count($fields)) {
-            switch ($mode) {
-                case 1:  $prefix = '^'; $suffix = '$'; break;  // strict
-                case 2:  $prefix = '^'; $suffix = '';  break;  // prefix
-                default: $prefix = '';  $suffix = '';  break;  // substring
+            if ($mode & rcube_addressbook::SEARCH_STRICT) {
+                $prefix = '^'; $suffix = '$';
+            }
+            else if ($mode & rcube_addressbook::SEARCH_PREFIX) {
+                $prefix = '^'; $suffix = '';
+            }
+            else {
+                $prefix = ''; $suffix = '';
             }
 
             $search_string = is_array($value) ? join(' ', $value) : $value;

@@ -59,7 +59,6 @@ class libcalendaring extends rcube_plugin
     );
 
     private static $instance;
-    private static $email_regex = '/([a-z0-9][a-z0-9\-\.\+\_]*@[^&@"\'.][^@&"\']*\\.([^\\x00-\\x40\\x5b-\\x60\\x7b-\\x7f]{2,}|xn--[a-z0-9]{2,}))/';
 
     private $mail_ical_parser;
 
@@ -131,6 +130,15 @@ class libcalendaring extends rcube_plugin
             $this->rc->output->set_env('libcal_settings', $this->load_settings());
             $this->include_script('libcalendaring.js');
             $this->include_stylesheet($this->local_skin_path() . '/libcal.css');
+
+            $this->add_label(
+                'itipaccepted', 'itiptentative', 'itipdeclined',
+                'itipdelegated', 'expandattendeegroup', 'expandattendeegroupnodata',
+                'statusorganizer', 'statusaccepted', 'statusdeclined',
+                'statusdelegated', 'statusunknown', 'statusneeds-action',
+                'statustentative', 'statuscompleted', 'statusin-process',
+                'delegatedto', 'delegatedfrom'
+            );
         }
 
         if ($args['task'] == 'mail') {
@@ -197,18 +205,19 @@ class libcalendaring extends rcube_plugin
     public function load_settings()
     {
         $this->date_format_defaults();
-        $settings = array();
 
-        // configuration
-        $settings['date_format'] = (string)$this->rc->config->get('calendar_date_format', $this->defaults['calendar_date_format']);
-        $settings['time_format'] = (string)$this->rc->config->get('calendar_time_format', $this->defaults['calendar_time_format']);
-        $settings['date_short']  = (string)$this->rc->config->get('calendar_date_short', $this->defaults['calendar_date_short']);
-        $settings['date_long']   = (string)$this->rc->config->get('calendar_date_long', $this->defaults['calendar_date_long']);
+        $settings = array();
+        $keys     = array('date_format', 'time_format', 'date_short', 'date_long');
+
+        foreach ($keys as $key) {
+            $settings[$key] = (string)$this->rc->config->get('calendar_' . $key, $this->defaults['calendar_' . $key]);
+            $settings[$key] = str_replace('Y', 'y', $settings[$key]);
+        }
+
         $settings['dates_long']  = str_replace(' yyyy', '[ yyyy]', $settings['date_long']) . "{ '&mdash;' " . $settings['date_long'] . '}';
         $settings['first_day']   = (int)$this->rc->config->get('calendar_first_day', $this->defaults['calendar_first_day']);
-
-        $settings['timezone'] = $this->timezone_offset;
-        $settings['dst'] = $this->dst_active;
+        $settings['timezone']    = $this->timezone_offset;
+        $settings['dst']         = $this->dst_active;
 
         // localization
         $settings['days'] = array(
@@ -727,7 +736,8 @@ class libcalendaring extends rcube_plugin
                 'id'       => $alarm['id'],
                 'start'    => $alarm['start'] ? $this->adjust_timezone($alarm['start'])->format('c') : '',
                 'end'      => $alarm['end']   ? $this->adjust_timezone($alarm['end'])->format('c') : '',
-                'allDay'   => ($alarm['allday'] == 1)?true:false,
+                'allDay'   => $alarm['allday'] == 1,
+                'action'   => $alarm['action'],
                 'title'    => $alarm['title'],
                 'location' => $alarm['location'],
                 'calendar' => $alarm['calendar'],
@@ -1311,11 +1321,11 @@ class libcalendaring extends rcube_plugin
     public function mail_message_load($p)
     {
         $this->ical_message = $p['object'];
-        $itip_part     = null;
+        $itip_part          = null;
 
         // check all message parts for .ics files
         foreach ((array)$this->ical_message->mime_parts as $part) {
-            if (self::part_is_vcalendar($part)) {
+            if (self::part_is_vcalendar($part, $this->ical_message)) {
                 if ($part->ctype_parameters['method'])
                     $itip_part = $part->mime_id;
                 else
@@ -1354,13 +1364,16 @@ class libcalendaring extends rcube_plugin
                     $this->mail_ical_parser->mime_id = $mime_id;
 
                     // store the message's sender address for comparisons
-                    $this->mail_ical_parser->sender = preg_match(self::$email_regex, $this->ical_message->headers->from, $m) ? $m[1] : '';
+                    $from = rcube_mime::decode_address_list($this->ical_message->headers->from, 1, true, null, true);
+                    $this->mail_ical_parser->sender = !empty($from) ? $from[1] : '';
+
                     if (!empty($this->mail_ical_parser->sender)) {
                         foreach ($this->mail_ical_parser->objects as $i => $object) {
                             $this->mail_ical_parser->objects[$i]['_sender'] = $this->mail_ical_parser->sender;
                             $this->mail_ical_parser->objects[$i]['_sender_utf'] = rcube_utils::idn_to_utf8($this->mail_ical_parser->sender);
                         }
                     }
+
                     break;
                 }
             }
@@ -1409,7 +1422,8 @@ class libcalendaring extends rcube_plugin
                 $object['_method'] = $parser->method;
 
             // store the message's sender address for comparisons
-            $object['_sender'] = preg_match(self::$email_regex, $headers->from, $m) ? $m[1] : '';
+            $from = rcube_mime::decode_address_list($headers->from, 1, true, null, true);
+            $object['_sender'] = !empty($from) ? $from[1] : '';
             $object['_sender_utf'] = rcube_utils::idn_to_utf8($object['_sender']);
 
             // check if this is an instance of a recurring event/task
@@ -1425,10 +1439,24 @@ class libcalendaring extends rcube_plugin
      * Checks if specified message part is a vcalendar data
      *
      * @param rcube_message_part Part object
+     * @param rcube_message      Message object
+     *
      * @return boolean True if part is of type vcard
      */
-    public static function part_is_vcalendar($part)
+    public static function part_is_vcalendar($part, $message = null)
     {
+        // First check if the message is "valid" (i.e. not multipart/report)
+        if ($message) {
+            $level = explode('.', $part->mime_id);
+
+            while (array_pop($level) !== null) {
+                $parent = $message->mime_parts[join('.', $level) ?: 0];
+                if ($parent->mimetype == 'multipart/report') {
+                    return false;
+                }
+            }
+        }
+
         return (
             in_array($part->mimetype, array('text/calendar', 'text/x-vcalendar', 'application/ics')) ||
             // Apple sends files as application/x-any (!?)
@@ -1479,18 +1507,23 @@ class libcalendaring extends rcube_plugin
      * Return the identifer for the given instance of a recurring event
      *
      * @param array Hash array with event properties
+     * @param bool  All-day flag from the main event
+     *
      * @return mixed Format string or null if identifier cannot be generated
      */
-    public static function recurrence_instance_identifier($event)
+    public static function recurrence_instance_identifier($event, $allday = null)
     {
         $instance_date = $event['recurrence_date'] ?: $event['start'];
 
         if ($instance_date && is_a($instance_date, 'DateTime')) {
-          $recurrence_id_format = $event['allday'] ? 'Ymd' : 'Ymd\THis';
-          return $instance_date->format($recurrence_id_format);
-        }
+            // According to RFC5545 (3.8.4.4) RECURRENCE-ID format should
+            // be date/date-time depending on the main event type, not the exception
+            if ($allday === null) {
+                $allday = $event['allday'];
+            }
 
-        return null;
+            return $instance_date->format($allday ? 'Ymd' : 'Ymd\THis');
+        }
     }
 
 
@@ -1552,43 +1585,61 @@ class libcalendaring extends rcube_plugin
      * Merge attendees of the old and new event version
      * with keeping current user and his delegatees status
      *
-     * @param array &$new New object data
-     * @param array $old  Old object data
+     * @param array &$new   New object data
+     * @param array $old    Old object data
+     * @param bool  $status New status of the current user
      */
-    public function merge_attendees(&$new, $old)
+    public function merge_attendees(&$new, $old, $status = null)
     {
-        $emails    = $this->get_user_emails();
-        $delegates = array();
-        $attendees = array();
+        if (empty($status)) {
+            $emails    = $this->get_user_emails();
+            $delegates = array();
+            $attendees = array();
 
-        // keep attendee status of the current user
-        foreach ((array) $new['attendees'] as $i => $attendee) {
-            if (empty($attendee['email'])) {
-                continue;
+            // keep attendee status of the current user
+            foreach ((array) $new['attendees'] as $i => $attendee) {
+                if (empty($attendee['email'])) {
+                    continue;
+                }
+
+                $attendees[] = $email = strtolower($attendee['email']);
+
+                if (in_array($email, $emails)) {
+                    foreach ($old['attendees'] as $_attendee) {
+                        if ($attendee['email'] == $_attendee['email']) {
+                            $new['attendees'][$i] = $_attendee;
+                            if ($_attendee['status'] == 'DELEGATED' && ($email = $_attendee['delegated-to'])) {
+                                $delegates[] = strtolower($email);
+                            }
+
+                            break;
+                        }
+                    }
+                }
             }
 
-            $attendees[] = $email = strtolower($attendee['email']);
-
-            if (in_array($email, $emails)) {
-                foreach ($old['attendees'] as $_attendee) {
-                    if ($attendee['email'] == $_attendee['email']) {
-                        $new['attendees'][$i] = $_attendee;
-                        if ($_attendee['status'] == 'DELEGATED' && ($email = $_attendee['delegated-to'])) {
-                            $delegates[] = strtolower($email);
+            // make sure delegated attendee is not lost
+            foreach ($delegates as $delegatee) {
+                if (!in_array($delegatee, $attendees)) {
+                    foreach ((array) $old['attendees'] as $attendee) {
+                        if ($attendee['email'] && ($email = strtolower($attendee['email'])) && $email == $delegatee) {
+                            $new['attendees'][] = $attendee;
+                            break;
                         }
-
-                        break;
                     }
                 }
             }
         }
 
-        // make sure delegated attendee is not lost
-        foreach ($delegates as $delegatee) {
-            if (!in_array($delegatee, $attendees)) {
-                foreach ((array) $old['attendees'] as $attendee) {
-                    if ($attendee['email'] && ($email = strtolower($attendee['email'])) && $email == $delegatee) {
-                        $new['attendees'][] = $attendee;
+        // We also make sure that status of any attendee
+        // is not overriden by NEEDS-ACTION if it was already set
+        // which could happen if you work with shared events
+        foreach ((array) $new['attendees'] as $i => $attendee) {
+            if ($attendee['email'] && $attendee['status'] == 'NEEDS-ACTION') {
+                foreach ($old['attendees'] as $_attendee) {
+                    if ($attendee['email'] == $_attendee['email']) {
+                        $new['attendees'][$i]['status'] = $_attendee['status'];
+                        unset($new['attendees'][$i]['rsvp']);
                         break;
                     }
                 }
@@ -1650,6 +1701,8 @@ class libcalendaring extends rcube_plugin
     {
         // "dd.MM.yyyy HH:mm:ss" => "d.m.Y H:i:s"
         return strtr(strtr($from, array(
+            'YYYY' => 'Y',
+            'YY'   => 'y',
             'yyyy' => 'Y',
             'yy'   => 'y',
             'MMMM' => 'F',

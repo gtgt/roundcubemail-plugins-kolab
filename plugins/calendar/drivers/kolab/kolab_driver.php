@@ -296,15 +296,14 @@ class kolab_driver extends calendar_driver
       'list'      => $this->calendars,
       'calendars' => $calendars,
       'filter'    => $filter,
-      'editable'  => ($filter & self::FILTER_WRITEABLE),
-      'insert'    => ($filter & self::FILTER_INSERTABLE),
-      'active'    => ($filter & self::FILTER_ACTIVE),
-      'personal'  => ($filter & self::FILTER_PERSONAL)
     ));
 
     if ($plugin['abort']) {
       return $plugin['calendars'];
     }
+
+    $personal = $filter & self::FILTER_PERSONAL;
+    $shared   = $filter & self::FILTER_SHARED;
 
     foreach ($this->calendars as $cal) {
       if (!$cal->ready) {
@@ -325,9 +324,13 @@ class kolab_driver extends calendar_driver
       if (($filter & self::FILTER_CONFIDENTIAL) && $cal->subtype != 'confidential') {
         continue;
       }
-      if (($filter & self::FILTER_PERSONAL) && $cal->get_namespace() != 'personal') {
-        continue;
+      if ($personal || $shared) {
+        $ns = $cal->get_namespace();
+        if (!(($personal && $ns == 'personal') || ($shared && $ns == 'shared'))) {
+          continue;
+        }
       }
+
       $calendars[$cal->id] = $cal;
     }
 
@@ -1138,21 +1141,21 @@ class kolab_driver extends calendar_driver
         // use start date from master but try to be smart on time or duration changes
         $old_start_date = $old['start']->format('Y-m-d');
         $old_start_time = $old['allday'] ? '' : $old['start']->format('H:i');
-        $old_duration = $old['end']->format('U') - $old['start']->format('U');
-        
+        $old_duration   = self::event_duration($old['start'], $old['end'], $old['allday']);
+
         $new_start_date = $event['start']->format('Y-m-d');
         $new_start_time = $event['allday'] ? '' : $event['start']->format('H:i');
-        $new_duration = $event['end']->format('U') - $event['start']->format('U');
-        
+        $new_duration   = self::event_duration($event['start'], $event['end'], $event['allday']);
+
         $diff = $old_start_date != $new_start_date || $old_start_time != $new_start_time || $old_duration != $new_duration;
         $date_shift = $old['start']->diff($event['start']);
-        
+
         // shifted or resized
         if ($diff && ($old_start_date == $new_start_date || $old_duration == $new_duration)) {
           $event['start'] = $master['start']->add($date_shift);
           $event['end'] = clone $event['start'];
-          $event['end']->add(new DateInterval('PT'.$new_duration.'S'));
-          
+          $event['end']->add(new DateInterval($new_duration));
+
           // remove fixed weekday, will be re-set to the new weekday in kolab_calendar::update_event()
           if ($old_start_date != $new_start_date) {
             if (strlen($event['recurrence']['BYDAY']) == 2)
@@ -1170,6 +1173,7 @@ class kolab_driver extends calendar_driver
         // when saving an instance in 'all' mode, copy recurrence exceptions over
         if ($old['recurrence_id']) {
           $event['recurrence']['EXCEPTIONS'] = $master['recurrence']['EXCEPTIONS'];
+          $event['recurrence']['EXDATE']     = $master['recurrence']['EXDATE'];
         }
         else if ($master['_instance']) {
           $event['_instance'] = $master['_instance'];
@@ -1222,8 +1226,21 @@ class kolab_driver extends calendar_driver
 
     if ($success && $this->freebusy_trigger)
       $this->rc->output->command('plugin.ping_url', array('action' => 'calendar/push-freebusy', 'source' => $storage->id));
-    
+
     return $success;
+  }
+
+  /**
+   * Calculate event duration, returns string in DateInterval format
+   */
+  protected static function event_duration($start, $end, $allday = false)
+  {
+    if ($allday) {
+      $diff = $start->diff($end);
+      return 'P' . $diff->days . 'D';
+    }
+
+    return 'PT' . ($end->format('U') - $start->format('U')) . 'S';
   }
 
   /**
@@ -1358,7 +1375,7 @@ class kolab_driver extends calendar_driver
     }
 
     if (!$event['_instance'] && is_a($event['recurrence_date'], 'DateTime')) {
-      $event['_instance'] = libcalendaring::recurrence_instance_identifier($event);
+      $event['_instance'] = libcalendaring::recurrence_instance_identifier($event, $master['allday']);
     }
 
     if (!is_array($master['exceptions']) && is_array($master['recurrence']['EXCEPTIONS'])) {
@@ -1390,7 +1407,6 @@ class kolab_driver extends calendar_driver
     }
   }
 
-
   /**
    * Merge certain properties from the overlay event to the base event object
    *
@@ -1405,31 +1421,47 @@ class kolab_driver extends calendar_driver
     if (is_array($blacklist))
       $forbidden = array_merge($forbidden, $blacklist);
 
-    // compute date offset from the exception
-    if ($overlay['start'] instanceof DateTime && $overlay['recurrence_date'] instanceof DateTime) {
-      $date_offset = $overlay['recurrence_date']->diff($overlay['start']);
-    }
-
     foreach ($overlay as $prop => $value) {
       if ($prop == 'start' || $prop == 'end') {
-        if (is_object($event[$prop]) && $event[$prop] instanceof DateTime) {
-          // set date value if overlay is an exception of the current instance
-          if (substr($overlay['_instance'], 0, 8) == substr($event['_instance'], 0, 8)) {
-            $event[$prop]->setDate(intval($value->format('Y')), intval($value->format('n')), intval($value->format('j')));
-          }
-          // apply date offset
-          else if ($date_offset) {
-            $event[$prop]->add($date_offset);
-          }
-          // adjust time of the recurring event instance
-          $event[$prop]->setTime($value->format('G'), intval($value->format('i')), intval($value->format('s')));
-        }
+        // handled by merge_exception_dates() below
       }
       else if ($prop == 'thisandfuture' && $overlay['_instance'] == $event['_instance']) {
         $event[$prop] = $value;
       }
       else if ($prop[0] != '_' && !in_array($prop, $forbidden))
         $event[$prop] = $value;
+    }
+
+    self::merge_exception_dates($event, $overlay);
+  }
+
+  /**
+   * Merge start/end date from the overlay event to the base event object
+   *
+   * @param array The event object to be altered
+   * @param array The overlay event object to be merged over $event
+   */
+  public static function merge_exception_dates(&$event, $overlay)
+  {
+    // compute date offset from the exception
+    if ($overlay['start'] instanceof DateTime && $overlay['recurrence_date'] instanceof DateTime) {
+      $date_offset = $overlay['recurrence_date']->diff($overlay['start']);
+    }
+
+    foreach (array('start', 'end') as $prop) {
+      $value = $overlay[$prop];
+      if (is_object($event[$prop]) && $event[$prop] instanceof DateTime) {
+        // set date value if overlay is an exception of the current instance
+        if (substr($overlay['_instance'], 0, 8) == substr($event['_instance'], 0, 8)) {
+          $event[$prop]->setDate(intval($value->format('Y')), intval($value->format('n')), intval($value->format('j')));
+        }
+        // apply date offset
+        else if ($date_offset) {
+          $event[$prop]->add($date_offset);
+        }
+        // adjust time of the recurring event instance
+        $event[$prop]->setTime($value->format('G'), intval($value->format('i')), intval($value->format('s')));
+      }
     }
   }
 
@@ -1652,15 +1684,14 @@ class kolab_driver extends calendar_driver
       $event = $storage->get_event($event['id']);
     }
 
-    if ($event && !empty($event['_attachments'])) {
-      foreach ($event['_attachments'] as $att) {
+    if ($event) {
+      $attachments = isset($event['_attachments']) ? $event['_attachments'] : $event['attachments'];
+      foreach ((array) $attachments as $att) {
         if ($att['id'] == $id) {
           return $att;
         }
       }
     }
-
-    return null;
   }
 
   /**

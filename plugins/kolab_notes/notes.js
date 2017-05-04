@@ -521,8 +521,7 @@ function rcube_kolab_notes_ui(settings)
                 // resize and reposition dialog window
                 form = $('#noteslistpropform');
                 var win = $(window), w = win.width(), h = win.height();
-                $dialog.dialog('option', { height: Math.min(h-20, form.height()+130), width: Math.min(w-20, form.width()+50) })
-                    .dialog('option', 'position', ['center', 'center']);  // only works in a separate call (!?)
+                $dialog.dialog('option', { height: Math.min(h-20, form.height()+130), width: Math.min(w-20, form.width()+50) });
 
                 name = $('#noteslist-name').prop('disabled', !has_permission(list, 'a')).val(list.editname || list.name);
                 name.select();
@@ -1234,7 +1233,7 @@ function rcube_kolab_notes_ui(settings)
                 }
             }
 
-            $(printwin).load(function(){
+            $(printwin).on('load', function() {
                 printwin.document.title = data.title;
                 $('#notetitle', printwin.document).html(Q(data.title));
                 $('#notebody',  printwin.document).html(data.description);

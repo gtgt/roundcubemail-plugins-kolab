@@ -235,6 +235,7 @@ class calendar_ui
       );
     }
 
+    $this->rc->output->set_env('source', rcube_utils::get_input_value('source', rcube_utils::INPUT_GET));
     $this->rc->output->set_env('calendars', $jsenv);
     $this->rc->output->add_gui_object('calendarslist', $attrib['id']);
 
@@ -410,7 +411,7 @@ class calendar_ui
     $select->add('---', '');
     $select->add($this->cal->gettext('status-confirmed'), 'CONFIRMED');
     $select->add($this->cal->gettext('status-cancelled'), 'CANCELLED');
-    //$select->add($this->cal->gettext('tentative'), 'TENTATIVE');
+    $select->add($this->cal->gettext('status-tentative'), 'TENTATIVE');
     return $select->show(null);
   }
 

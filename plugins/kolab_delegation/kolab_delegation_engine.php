@@ -54,6 +54,8 @@ class kolab_delegation_engine
      *
      * @param string|array $delegate Delegate DN (encoded) or delegate data (result of delegate_get())
      * @param array        $acl      List of folder->right map
+     *
+     * @return string On error returns an error label, on success returns null
      */
     public function delegate_add($delegate, $acl)
     {
@@ -63,18 +65,20 @@ class kolab_delegation_engine
 
         $dn = $delegate['ID'];
         if (empty($delegate) || empty($dn)) {
-            return false;
+            return 'createerror';
         }
 
         $list = $this->list_delegates();
-
-        // add delegate to the list
         $list = array_keys((array)$list);
         $list = array_filter($list);
-        if (!in_array($dn, $list)) {
-            $list[] = $dn;
+
+        if (in_array($dn, $list)) {
+            return 'delegationexisterror';
         }
-        $list = array_map(array('kolab_auth_ldap', 'dn_decode'), $list);
+
+        // add delegate to the list
+        $list[] = $dn;
+        $list   = array_map(array('kolab_auth_ldap', 'dn_decode'), $list);
 
         // update user record
         $result = $this->user_update_delegates($list);
@@ -84,7 +88,7 @@ class kolab_delegation_engine
             $this->delegate_acl_update($delegate['uid'], $acl);
         }
 
-        return $result;
+        return $result ? null : 'createerror';
     }
 
     /**
@@ -93,6 +97,8 @@ class kolab_delegation_engine
      * @param string $uid    Delegate authentication identifier
      * @param array  $acl    List of folder->right map
      * @param bool   $update Update (remove) old rights
+     *
+     * @return string On error returns an error label, on success returns null
      */
     public function delegate_acl_update($uid, $acl, $update = false)
     {
@@ -119,8 +125,6 @@ class kolab_delegation_engine
                 $storage->delete_acl($folder_name, $uid);
             }
         }
-
-        return true;
     }
 
     /**
@@ -128,6 +132,8 @@ class kolab_delegation_engine
      *
      * @param string $dn      Delegate DN (encoded)
      * @param bool   $acl_del Enable ACL deletion on delegator folders
+     *
+     * @return string On error returns an error label, on success returns null
      */
     public function delegate_delete($dn, $acl_del = false)
     {
@@ -136,7 +142,7 @@ class kolab_delegation_engine
         $user     = $this->user();
 
         if (empty($delegate) || !isset($list[$dn])) {
-            return false;
+            return 'deleteerror';
         }
 
         // remove delegate from the list
@@ -153,7 +159,7 @@ class kolab_delegation_engine
             $this->delegate_acl_update($delegate['uid'], array(), true);
         }
 
-        return $result;
+        return $result ? null : 'deleteerror';
     }
 
     /**
@@ -777,56 +783,79 @@ class kolab_delegation_engine
     }
 
     /**
-     * Filters list of calendars according to delegator context
+     * Filters list of calendar/task folders according to delegator context
      *
      * @param array $args Reference to plugin hook arguments
      */
-    public function delegator_folder_filter(&$args)
+    public function delegator_folder_filter(&$args, $mode = 'calendars')
     {
-        $context   = $this->delegator_context();
-        $storage   = $this->rc->get_storage();
-        $other_ns  = $storage->get_namespace('other');
-        $delim     = $storage->get_hierarchy_delimiter();
-        $calendars = array();
+        $context = $this->delegator_context();
 
-        // code parts derived from kolab_driver::filter_calendars()
-        foreach ($args['list'] as $cal) {
-            if (!$cal->ready) {
-                continue;
-            }
-            if ($args['writeable'] && $cal->readonly) {
-                continue;
-            }
-            if ($args['active'] && !$cal->storage->is_active()) {
-                continue;
-            }
-            if ($args['personal']) {
-                $ns   = $cal->get_namespace();
-
-                if (empty($context)) {
-                    if ($ns != 'personal') {
-                        continue;
-                    }
-                }
-                else {
-                    if ($ns != 'other') {
-                        continue;
-                    }
-
-                    foreach ($other_ns as $ns) {
-                        $folder = $ns[0] . $context . $delim;
-                        if (strpos($cal->name, $folder) !== 0) {
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            $calendars[$cal->id] = $cal;
+        if (empty($context)) {
+            return $args;
         }
 
-        $args['calendars'] = $calendars;
-        $args['abort']     = true;
+        $storage  = $this->rc->get_storage();
+        $other_ns = $storage->get_namespace('other');
+        $delim    = $storage->get_hierarchy_delimiter();
+
+        if ($mode == 'calendars') {
+            $editable = $args['filter'] & calendar_driver::FILTER_WRITEABLE;
+            $active   = $args['filter'] & calendar_driver::FILTER_ACTIVE;
+            $personal = $args['filter'] & calendar_driver::FILTER_PERSONAL;
+            $shared   = $args['filter'] & calendar_driver::FILTER_SHARED;
+        }
+        else {
+            $editable = $args['filter'] & tasklist_driver::FILTER_WRITEABLE;
+            $active   = $args['filter'] & tasklist_driver::FILTER_ACTIVE;
+            $personal = $args['filter'] & tasklist_driver::FILTER_PERSONAL;
+            $shared   = $args['filter'] & tasklist_driver::FILTER_SHARED;
+        }
+
+        $folders = array();
+
+        foreach ($args['list'] as $folder) {
+            if (isset($folder->ready) && !$folder->ready) {
+                continue;
+            }
+
+            if ($editable && !$folder->editable) {
+                continue;
+            }
+
+            if ($active && !$folder->storage->is_active()) {
+                continue;
+            }
+
+            if ($personal || $shared) {
+                $ns = $folder->get_namespace();
+
+                if ($personal && $ns == 'personal') {
+                    continue;
+                }
+                else if ($personal && $ns == 'other') {
+                    $found = false;
+                    foreach ($other_ns as $ns) {
+                        $c_folder = $ns[0] . $context . $delim;
+                        if (strpos($folder->name, $c_folder) === 0) {
+                            $found = true;
+                        }
+                    }
+
+                    if (!$found) {
+                        continue;
+                    }
+                }
+                else if (!$shared || $ns != 'shared') {
+                    continue;
+                }
+            }
+
+            $folders[$folder->id] = $folder;
+        }
+
+        $args[$mode]   = $folders;
+        $args['abort'] = true;
     }
 
     /**

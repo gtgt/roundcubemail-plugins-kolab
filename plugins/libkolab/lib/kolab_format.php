@@ -234,7 +234,10 @@ abstract class kolab_format
             if (!$dateonly)
                 $result->setTime($datetime->format('G'), $datetime->format('i'), $datetime->format('s'));
 
-            if ($tz && in_array($tz->getName(), array('UTC', 'GMT', '+00:00', 'Z'))) {
+            // libkolabxml throws errors on some deprecated timezone names
+            $utc_aliases = array('UTC', 'GMT', '+00:00', 'Z', 'Etc/GMT');
+
+            if ($tz && in_array($tz->getName(), $utc_aliases)) {
                 $result->setUTC(true);
             }
             else if ($tz !== false) {
@@ -520,11 +523,12 @@ abstract class kolab_format
             $this->obj->setUid($object['uid']);
 
         // set some automatic values if missing
-        if (empty($object['created']) && method_exists($this->obj, 'setCreated')) {
-            $cdt = $this->obj->created();
-            $object['created'] = $cdt && $cdt->isValid() ? self::php_datetime($cdt) : new DateTime('now', new DateTimeZone('UTC'));
-            if (!$cdt || !$cdt->isValid())
-                $this->obj->setCreated(self::get_datetime($object['created']));
+        if (method_exists($this->obj, 'setCreated')) {
+            // Always set created date to workaround libkolabxml (>1.1.4) bug
+            $created = $object['created'] ?: new DateTime('now');
+            $created->setTimezone(new DateTimeZone('UTC')); // must be UTC
+            $this->obj->setCreated(self::get_datetime($created));
+            $object['created'] = $created;
         }
 
         $object['changed'] = new DateTime('now', new DateTimeZone('UTC'));
